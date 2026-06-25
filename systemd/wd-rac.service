@@ -1,6 +1,6 @@
 [Unit]
 Description=WsprDaemon Remote Access Channel (frpc tunnel)
-Documentation=https://github.com/mijahauan/rac
+Documentation=https://github.com/HamSCI/rac
 After=network-online.target
 Wants=network-online.target
 # Stays inert until configured: frpc.toml only exists once the operator fills
