@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# rac — install the WsprDaemon Remote Access Channel (frpc reverse tunnel).
+# sigmond-rac — install the WsprDaemon Remote Access Channel (frpc reverse tunnel).
 #
 # Provisions the vendored frpc binary (per-arch), the frps TLS CA, the
 # wd-rac.service unit, and a station-specific frpc.toml TEMPLATE.  It enables
 # the unit so RAC is part of the install footprint, but the unit's
 # ConditionPathExists=/etc/sigmond/frpc.toml guard keeps it INERT until the
 # operator fills in the gw2 user/token/remotePort assignment from the
-# WsprDaemon admin.  Idempotent.  Run by `smd install rac` (as root via sudo).
+# WsprDaemon admin.  Idempotent.  Run by `smd install sigmond-rac` (as root via sudo).
 set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 FRP_VER="0.64.0"

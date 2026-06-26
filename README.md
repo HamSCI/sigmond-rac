@@ -1,4 +1,4 @@
-# rac — Remote Access Channel
+# sigmond-rac — Remote Access Channel
 
 A sigmond infrastructure component that gives the WsprDaemon admin SSH/web
 access to a NAT'd station via an **frpc reverse tunnel** to

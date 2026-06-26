@@ -1,5 +1,5 @@
 # RAC (frpc) reverse-tunnel config TEMPLATE.
-# rac/install.sh renders this to /etc/sigmond/frpc.toml.template with the
+# sigmond-rac/install.sh renders this to /etc/sigmond/frpc.toml.template with the
 # station's proxy name filled in.  To ACTIVATE, get this station's gw2
 # assignment from the WsprDaemon admin (Rob), fill the <...> values, then:
 #   sudo cp /etc/sigmond/frpc.toml.template /etc/sigmond/frpc.toml
