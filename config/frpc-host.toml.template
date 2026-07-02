@@ -1,0 +1,33 @@
+# RAC (frpc) reverse-tunnel config TEMPLATE — PROXMOX HOST variant.
+# install-host.sh renders this to /etc/sigmond/frpc-host.toml.template with
+# the host's proxy name filled in.  The HOST tunnel exists so the site stays
+# reachable even when the DASI2 VM is down or being rebuilt — it publishes
+# the HOST's own sshd only (no web proxy; ka9q-web lives in the guest).
+# To ACTIVATE, get this host's gw2 assignment from the WsprDaemon admin
+# (its remotePort must be distinct from the guest VM's), then:
+#   cp /etc/sigmond/frpc-host.toml.template /etc/sigmond/frpc-host.toml
+#   systemctl restart sigmond-rac-host
+# serverAddr/serverPort + the TLS CA are shared across the fleet.
+
+serverAddr = "gw2.wsprdaemon.org"
+serverPort = 35736
+user = "<RAC_USER_FROM_WD_ADMIN>"
+
+[auth]
+method = "token"
+token = "<RAC_TOKEN_FROM_WD_ADMIN>"
+
+[transport.tls]
+enable = true
+trustedCaFile = "/etc/sigmond/frps-ca.crt"
+
+[webServer]
+addr = "127.0.0.1"
+port = 7500
+
+[[proxies]]
+name = "@PROXY@"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = 0   # <SSH_REMOTEPORT_FROM_WD_ADMIN — unique, ≠ the guest VM's>

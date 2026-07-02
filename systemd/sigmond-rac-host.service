@@ -1,0 +1,18 @@
+[Unit]
+Description=Sigmond Remote Access Channel — Proxmox HOST tunnel (frpc)
+Documentation=https://github.com/HamSCI/sigmond-rac
+After=network-online.target
+Wants=network-online.target
+# Stays inert until configured: frpc-host.toml only exists once the operator
+# fills in the gw2 user/token/remotePort assignment from the WsprDaemon admin.
+ConditionPathExists=/etc/sigmond/frpc-host.toml
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/frpc -c /etc/sigmond/frpc-host.toml
+Restart=always
+RestartSec=30s
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

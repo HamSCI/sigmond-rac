@@ -25,6 +25,24 @@ sudo systemctl restart wd-rac
 
 Until `/etc/sigmond/frpc.toml` exists the unit never starts (no fail-loop).
 
+## Proxmox HOST tunnel (install-host.sh)
+
+A DASI2 site runs the station as a VM on a Proxmox host.  The guest RAC
+above covers only the VM — `install-host.sh` installs a SECOND,
+independent frpc **on the hypervisor** so the site stays reachable even
+when the VM is down or being rebuilt.  It publishes the host's own sshd
+only (no web proxy), as unit `sigmond-rac-host.service`, gated on
+`/etc/sigmond/frpc-host.toml` (same inert-until-configured model; its
+remotePort must be distinct from the guest's).  Normally delivered and
+run by sigmond's proxmox bootstrap (`install_host_rac`); standalone:
+
+```bash
+# on the Proxmox host, from a sigmond-rac checkout:
+sudo bash install-host.sh
+# activate: fill /etc/sigmond/frpc-host.toml.template ->
+#   cp ... /etc/sigmond/frpc-host.toml && systemctl restart sigmond-rac-host
+```
+
 ## Adding an arch
 Drop `frpc-<arch>-v<ver>` into `bin/` (from the frp release for that arch) and
 bump `FRP_VER` in `install.sh`.
