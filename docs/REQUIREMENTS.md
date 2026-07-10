@@ -105,7 +105,12 @@ screen (operator UX) · the station's local sshd (port 22) and optional web
   (0644) and the unit to `/etc/systemd/system/wd-rac.service` (0644).
 - `RAC-F-003` `[CODE]` ✅ SHALL render the config template to
   `/etc/sigmond/frpc.toml.template` (0640) with the per-station proxy name
-  substituted (`@PROXY@` → `STATION_CALL/<INSTANCE-UPPER>`).
+  substituted: `@PROXY@` → the station's **reporter ID, exactly** (resolved
+  from `STATION_REPORTER_ID`/`STATION_CALL` in the env, else
+  `/etc/sigmond/coordination.env`).  Reporter IDs are fleet-unique (wsprnet
+  identity), so no host/instance suffix is appended.  When no identity is
+  configured, render a `<REPORTER_ID>` placeholder and warn — SHALL NOT bake
+  in a default callsign (that is how wrong accounts end up on the gateway).
 - `RAC-F-004` `[DOC]` ✅ SHALL `daemon-reload` and `enable wd-rac.service` so RAC is
   part of the install footprint, without starting it.
 - `RAC-F-005` `[CODE]` ✅ SHALL (re)start `wd-rac.service` **iff**
@@ -116,11 +121,12 @@ screen (operator UX) · the station's local sshd (port 22) and optional web
 - `RAC-F-007` `[NEW]` ✅ SHALL ensure the station has an SSH identity and that the
   gateway knows it, by delegating to `smd admin rac register` — sigmond's one
   implementation of keypair creation (`/etc/sigmond/frpc_id_rsa`, ed25519, when
-  no `wsprdaemon` user key exists) + public-key upload (with the station's
-  `CALL/INSTANCE` reporter id) to the gw2 registration drop, from which the
-  server auto-provisions the account.  Skipped with a notice when
-  `STATION_CALL` is unset (identity not yet configured); idempotent via a
-  marker (`/etc/sigmond/.rac-registered`) so re-installs don't re-upload;
+  no `wsprdaemon` user key exists) + public-key upload (under the station's
+  reporter ID per `RAC-F-003`) to the gw2 registration drop, from which the
+  server auto-provisions the account.  Skipped with a notice when no reporter
+  ID is configured — identity MUST be configured before RAC setup; neither
+  install nor register may invent one.  Idempotent via a marker
+  (`/etc/sigmond/.rac-registered`) so re-installs don't re-upload;
   registration failure is loud but does not fail the install.  A standalone
   run without `smd` on PATH still generates the keypair and prints the manual
   registration instructions.
@@ -170,8 +176,10 @@ screen (operator UX) · the station's local sshd (port 22) and optional web
 - **Config template:** `config/frpc.toml.template` → rendered to
   `/etc/sigmond/frpc.toml.template`; operator copies to
   `/etc/sigmond/frpc.toml` after filling the gw2 assignment.
-- **Identity env (render-time):** `STATION_CALL` (default `AC0G`),
-  `SIGMOND_INSTANCE` (default hostname) → the `@PROXY@` proxy name.
+- **Identity env (render-time):** `STATION_REPORTER_ID` / `STATION_CALL`
+  (env, else `/etc/sigmond/coordination.env`) → the `@PROXY@` proxy name;
+  `<REPORTER_ID>` placeholder when identity is not configured (no default
+  callsign).
 - **gw2 assignment (operator-supplied):** `user`, `token` (method=token), and
   unique `remotePort`(s) — from the WsprDaemon admin. Fixed shared values:
   `serverAddr=gw2.wsprdaemon.org`, `serverPort=35736`.

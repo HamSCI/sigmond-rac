@@ -36,10 +36,32 @@ install -m 0644 -o root -g root "$SCRIPT_DIR/frps-ca.crt" /etc/sigmond/frps-ca.c
 install -m 0644 -o root -g root "$SCRIPT_DIR/systemd/wd-rac.service" \
         /etc/systemd/system/wd-rac.service
 
-# 4. render the station-specific frpc.toml template (proxy name from identity)
-call="${STATION_CALL:-AC0G}"
-inst="${SIGMOND_INSTANCE:-$(hostname -s 2>/dev/null || echo station)}"
-proxy="${call}/$(printf '%s' "$inst" | tr '[:lower:]' '[:upper:]')"
+# 4. render the station-specific frpc.toml template (proxy = reporter ID)
+#    The proxy name IS the station's reporter ID, exactly — the unique
+#    identity it uploads to wsprnet.org under.  No host/instance suffix:
+#    reporter IDs are already fleet-unique, and the gw2 entries must match
+#    them.  Resolve from the env (smd install passes the identity bag
+#    through), else the station's coordination.env.  When neither defines
+#    it, render a placeholder and warn — the operator must configure
+#    identity BEFORE the RAC can be activated or registered; baking in a
+#    default callsign here is how wrong accounts end up on the gateway.
+coord_get() {
+  sed -n "s/^$1=//p" /etc/sigmond/coordination.env 2>/dev/null \
+    | head -1 | tr -d "\"'"
+}
+call="${STATION_REPORTER_ID:-${STATION_CALL:-}}"
+if [ -z "$call" ]; then
+  call="$(coord_get STATION_REPORTER_ID)"
+  [ -n "$call" ] || call="$(coord_get STATION_CALL)"
+fi
+if [ -n "$call" ]; then
+  proxy="$call"
+else
+  proxy="<REPORTER_ID>"
+  log "WARNING: station reporter ID not configured — rendering the template"
+  log "  with a <REPORTER_ID> placeholder.  Configure identity first"
+  log "  (smd config identity), then re-run:  smd install sigmond-rac"
+fi
 tmpl="/etc/sigmond/frpc.toml.template"
 sed "s|@PROXY@|${proxy}|g" "$SCRIPT_DIR/config/frpc.toml.template" > "$tmpl"
 chmod 0640 "$tmpl"
@@ -54,12 +76,12 @@ log "wrote $tmpl (proxy '${proxy}')"
 #    `smd admin rac register` — the one implementation of keypair creation
 #    + gateway registration (idempotent via /etc/sigmond/.rac-registered).
 if command -v smd >/dev/null 2>&1; then
-  if [ -n "${STATION_CALL:-}" ]; then
+  if [ "$proxy" != "<REPORTER_ID>" ]; then
     smd admin rac register --id "$proxy" \
       || log "WARNING: gateway key registration failed — see messages above;" \
              "re-run  smd admin rac register  when connectivity allows."
   else
-    log "STATION_CALL not set — skipping gateway key registration."
+    log "station reporter ID not configured — skipping gateway key registration."
     log "  run  smd admin rac register  after  smd config identity"
   fi
 else
