@@ -54,7 +54,10 @@ component delivers the PSWS charette item #39, "Centralized Remote Admin."
 
 - **Provisioning the gw2 side.** Server (`frps`), the user/token issuance, and the
   unique remotePort allocation are owned by the WsprDaemon admin / gateway, not by
-  this component.
+  this component. *(Amended 2026-07-10: the station's SSH **key registration** is
+  now automated — install.sh uploads the public key to the gateway's FTP
+  registration drop and the server auto-provisions the account; see `RAC-F-007`.
+  Everything else gateway-side remains out of scope.)*
 - **Inventory / validation / self-description.** This is infra; it does not
   participate in the client contract (`inventory --json` / `validate --json`),
   has no `data_sinks`, and is not a radiod client. (§8.3.)
@@ -110,6 +113,17 @@ screen (operator UX) · the station's local sshd (port 22) and optional web
   instructions and leave the unit inert.
 - `RAC-F-006` `[DOC]` ✅ SHALL be **idempotent** — re-running re-installs binary,
   CA, unit, and template without side effects on an armed tunnel.
+- `RAC-F-007` `[NEW]` ✅ SHALL ensure the station has an SSH identity and that the
+  gateway knows it, by delegating to `smd admin rac register` — sigmond's one
+  implementation of keypair creation (`/etc/sigmond/frpc_id_rsa`, ed25519, when
+  no `wsprdaemon` user key exists) + public-key upload (with the station's
+  `CALL/INSTANCE` reporter id) to the gw2 registration drop, from which the
+  server auto-provisions the account.  Skipped with a notice when
+  `STATION_CALL` is unset (identity not yet configured); idempotent via a
+  marker (`/etc/sigmond/.rac-registered`) so re-installs don't re-upload;
+  registration failure is loud but does not fail the install.  A standalone
+  run without `smd` on PATH still generates the keypair and prints the manual
+  registration instructions.
 
 ### 6.2 Tunnel runtime (wd-rac.service)
 - `RAC-F-010` `[DOC]` ✅ The unit SHALL run `frpc -c /etc/sigmond/frpc.toml` and

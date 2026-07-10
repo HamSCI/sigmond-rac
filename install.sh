@@ -2,7 +2,10 @@
 # sigmond-rac — install the WsprDaemon Remote Access Channel (frpc reverse tunnel).
 #
 # Provisions the vendored frpc binary (per-arch), the frps TLS CA, the
-# wd-rac.service unit, and a station-specific frpc.toml TEMPLATE.  It enables
+# wd-rac.service unit, and a station-specific frpc.toml TEMPLATE.  Also
+# ensures the station's SSH keypair exists and its public key is registered
+# on the gateway (via `smd admin rac register`), so a greenfield install can
+# bring the tunnel up without the admin hand-installing keys.  It enables
 # the unit so RAC is part of the install footprint, but the unit's
 # ConditionPathExists=/etc/sigmond/frpc.toml guard keeps it INERT until the
 # operator fills in the gw2 user/token/remotePort assignment from the
@@ -42,7 +45,38 @@ sed "s|@PROXY@|${proxy}|g" "$SCRIPT_DIR/config/frpc.toml.template" > "$tmpl"
 chmod 0640 "$tmpl"
 log "wrote $tmpl (proxy '${proxy}')"
 
-# 5. enable (part of the install footprint); inert via ConditionPathExists
+# 5. station SSH identity + gateway registration
+#    The gw2 auth plugin only accepts a station whose SSH public key is
+#    registered on the gateway (account + authorized_keys, auto-provisioned
+#    server-side from the registration drop).  A greenfield host has neither
+#    key nor account, so RAC could never come up until someone mailed the
+#    key to the admin and he installed it by hand.  Delegate to
+#    `smd admin rac register` — the one implementation of keypair creation
+#    + gateway registration (idempotent via /etc/sigmond/.rac-registered).
+if command -v smd >/dev/null 2>&1; then
+  if [ -n "${STATION_CALL:-}" ]; then
+    smd admin rac register --id "$proxy" \
+      || log "WARNING: gateway key registration failed — see messages above;" \
+             "re-run  smd admin rac register  when connectivity allows."
+  else
+    log "STATION_CALL not set — skipping gateway key registration."
+    log "  run  smd admin rac register  after  smd config identity"
+  fi
+else
+  # standalone run (no smd on PATH): still guarantee the station keypair,
+  # and tell the operator how to finish registration.
+  KEY=/etc/sigmond/frpc_id_rsa
+  if [ ! -f "$KEY.pub" ]; then
+    ssh-keygen -q -t ed25519 -N '' -C "wd-rac@$(hostname -s)" -f "$KEY"
+    chmod 600 "$KEY"; chmod 644 "$KEY.pub"
+    log "generated station SSH keypair $KEY"
+  fi
+  log "smd not found — run  smd admin rac register  once sigmond is"
+  log "  installed, or send this public key to the WsprDaemon admin:"
+  log "    $(cat "$KEY.pub")"
+fi
+
+# 6. enable (part of the install footprint); inert via ConditionPathExists
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable wd-rac.service 2>/dev/null || true
 
