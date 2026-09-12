@@ -5,6 +5,10 @@ access to a NAT'd station via an **frpc reverse tunnel** to
 `gw2.wsprdaemon.org`.  Derived from the legacy wsprdaemon-client's `wd-rac`,
 repackaged so every sigmond install can carry it.
 
+Docs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the tunnels, the
+gateway, and the access tiers fit together · [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
+— the `RAC-*` spec.
+
 ## What it installs
 - `/usr/local/sbin/frpc` — vendored frp client (per-arch, under `bin/`)
 - `/etc/sigmond/frps-ca.crt` — frps TLS CA
