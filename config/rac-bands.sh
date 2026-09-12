@@ -33,9 +33,11 @@ rac_band_base() {
   esac
 }
 #
-# WARNING: on vpn.hamsci.org the firewall accepts 46000-46999 from the OPEN
-# INTERNET (everything else is VPN-only), so a vm_web2 port lands in a range
-# the whole world can reach.  Check with the admin before using that band.
+# WARNING: every tunnel port is meant to be reachable ONLY over WireGuard, at
+# 10.3.2.1:<port>.  One deviation exists today: the gateway also accepts
+# 46000-46999 from the open internet ("web tunnels"), which is the range a
+# vm_web2 port (46800 + n) lands in.  Until that rule is removed, treat that
+# band as public.
 
 # rac_render_proxies <proxy-name prefix> <site number|""> <vm address> <spec...>
 #

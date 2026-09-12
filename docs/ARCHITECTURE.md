@@ -185,8 +185,12 @@ leaves an armed tunnel running.
 
 ## Reaching a service
 
-Admins reach every port at the gateway's VPN address — never from the open
-internet:
+Every tunnel port is reachable **only** at the gateway's VPN address,
+`10.3.2.1`, and only by someone holding a WireGuard configuration for that
+server. There is no public path to a station: the gateway's firewall accepts
+everything arriving on `wg0` and, from the internet, only :22, :51820 and the
+two frps control ports — the ports stations dial *out* to. A service is
+therefore a port on the server's VPN tunnel address, nothing more.
 
 ```bash
 ssh -p $((35800 + n)) <station-user>@10.3.2.1     # the DASI2 VM
@@ -197,11 +201,12 @@ https://10.3.2.1:$((55800 + n))                   # the Proxmox VE UI
 Reusing another site's port collides on the gateway (`RAC-C-004`); frps is
 the final arbiter and rejects the proxy with `port already used`.
 
-The gateway's firewall accepts **everything** arriving over WireGuard, and
-from the public internet only :22, :51820, the two frps ports — and
-**46000–46999**. A `vm_web2` port (46800 + n) therefore lands in a range the
-whole internet can reach, unlike every other band; check with the admin
-before using it.
+One deviation from that rule exists today and is worth knowing about while
+it lasts: the gateway's persisted ruleset also accepts **46000–46999** from
+the internet (`# web tunnels`), which currently exposes a handful of legacy
+HamSCI stations' web UIs directly — and is the range `vm_web2` (46800 + n)
+would land in. The intent is that this closes, leaving every port VPN-only;
+until it does, treat that band as public.
 
 On the WsprDaemon side the same role is played by that gateway's tiers
 (`wd-mesh` 10.112.0.2 for admins, `wd-rac` 10.111.220.1 for station
