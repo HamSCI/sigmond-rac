@@ -74,17 +74,16 @@ if [ ! -f "$KEY.pub" ]; then
 fi
 pubkey="$(cat "$KEY.pub")"
 
-#    The user id is this tunnel's stable identity on the gateway, and the
-#    VM and the hypervisor must not share one (the gateway files a single
-#    key per id).  Prefer the assigned DASI number; otherwise derive one
-#    from the reporter ID, with the hypervisor's "-host" counterpart
-#    rendered by install-host.sh.
+#    The user id is this station's stable identity on the gateway: the
+#    assigned DASI number when there is one, else the reporter ID.  One
+#    login per site — on a DASI2 site the hypervisor holds it (see
+#    install-host.sh) and this tunnel is left unarmed.
 dasi="${SIGMOND_DASI_ID:-${DASI_ID:-}}"
 [ -n "$dasi" ] || dasi="$(coord_get DASI_ID)"
 if [ -n "$dasi" ]; then
   user="$dasi"
 elif [ "$proxy" != "<REPORTER_ID>" ]; then
-  user="${proxy}-vm"
+  user="$proxy"
 else
   user="<DASI_ID_OR_STATION_ID>"
 fi

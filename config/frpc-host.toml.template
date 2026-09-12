@@ -1,41 +1,53 @@
-# RAC (frpc) reverse-tunnel config TEMPLATE — PROXMOX HOST variant.
+# RAC (frpc) reverse-tunnel config TEMPLATE — DASI2 site (Proxmox host).
 # install-host.sh renders this to /etc/sigmond/frpc-host.toml.template with
-# the hypervisor's identity filled in.  The HOST tunnel exists so the site
-# stays reachable even when the DASI2 VM is down or being rebuilt, so it
-# carries the HOST's own services: its sshd (host-ssh) and the Proxmox VE
-# web UI (host-ui).  Everything the station serves belongs to the VM's
-# tunnel (frpc.toml) instead.
-# To ACTIVATE, get this host's remote port assignment from the WsprDaemon
-# admin (its ports must be distinct from the guest VM's), then:
+# the site's identity and its VM's address filled in.  To ACTIVATE, get this
+# site's remote port assignment from the WsprDaemon admin, then:
 #   cp /etc/sigmond/frpc-host.toml.template /etc/sigmond/frpc-host.toml
 #   systemctl restart sigmond-rac-host
 #
-# Gateway and auth are identical to the guest tunnel: vpn.hamsci.org:35736
-# (frps-secure, TLS forced, trust-on-first-use, no registrar).  This tunnel
-# is a SEPARATE login with its OWN keypair, so it needs its own user id —
-# the gateway files one pubkey per user id and refuses a second key
-# claiming the same one.
-# Proxy names are "<reporter ID>-<band>": the same station identity as the
-# VM's tunnel, with the band suffix marking which hypervisor service it is.
-# That is what groups a site's host and VM tunnels together on the
-# rac-dashboard, so do not rename them.
+# ONE login per site.  This frpc runs on the hypervisor — the machine that
+# is up when the VM is not — and carries everything the site publishes:
+# the host's own sshd and Proxmox VE web UI over 127.0.0.1, and the DASI2
+# VM's sshd and web forwarded across the bridge to the VM's address.  A
+# second frpc for the guest is NOT wanted: the gateway files one key per
+# login id, so two tunnels sharing this site's id would see the second
+# refused — which is the intended guard against double-arming a site.
+#
+# Gateway: sigmond stations tunnel to HamSCI's own server, vpn.hamsci.org,
+# not to WsprDaemon's gw2.  :35736 is its frps-secure instance (TLS forced,
+# trust-on-first-use auth); :35735 is the legacy open frps that the older
+# HamSCI volunteer stations still use.  There is no registrar here.
+#
+# Identity: the gateway's TOFU plugin admits a login that carries a user id
+# and a pubkey in [metadatas].  The FIRST login to claim a given user id
+# files its pubkey; later logins must present the same key, so nothing else
+# can take this site's identity.  The token is NOT the gate and is empty by
+# design.  Re-keying a site means the admin must first delete its entry from
+# the gateway registry, or the new key is refused.
+#
+# remotePort(s) MUST be unique fleet-wide — never reuse another site's.
+# Proxy names are "<reporter ID>-<band>"; the rac-dashboard keys on those
+# band suffixes to group a site's tunnels, so do not rename them.  A further
+# service gets one more [[proxies]] block named for its band (e.g. vm-grape
+# for the PSWS/GRAPE WWV carrier charts on the VM's :8088).
 
 serverAddr = "vpn.hamsci.org"
 serverPort = 35736
 user = "@USER@"
 
+# Reconnect forever instead of exiting when the gateway is unreachable at
+# startup.  Must stay above the first table header to be a top-level key.
+loginFailExit = false
+
 [auth]
 method = "token"
 token = ""
 
-# frps-secure forces TLS; its certificate is self-signed and no CA is
-# published, so there is nothing to pin — identity comes from the TOFU
-# pubkey below, not from the certificate.
+# frps-secure forces TLS.  Its certificate is self-signed and no CA is
+# published, so there is no trustedCaFile to pin: TLS provides the
+# encryption, and the TOFU pubkey below provides the identity.
 [transport.tls]
 enable = true
-
-# Reconnect forever instead of exiting when the gateway is unreachable.
-loginFailExit = false
 
 [metadatas]
 pubkey = "@PUBKEY@"
@@ -46,12 +58,13 @@ dasi = "@DASI@"
 addr = "127.0.0.1"
 port = 7500
 
+# --- the hypervisor's own services (local) ---------------------------------
 [[proxies]]
 name = "@PROXY@-host-ssh"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 22
-remotePort = 0   # <HOST_SSH_REMOTEPORT_FROM_WD_ADMIN — unique, ≠ the guest VM's>
+remotePort = 0   # <HOST_SSH_REMOTEPORT_FROM_WD_ADMIN>
 
 # Proxmox VE web UI (https), so the hypervisor can be driven from a browser
 # when the VM is down or being rebuilt — the case this tunnel exists for.
@@ -61,3 +74,21 @@ type = "tcp"
 localIP = "127.0.0.1"
 localPort = 8006
 remotePort = 0   # <HOST_UI_REMOTEPORT_FROM_WD_ADMIN>
+
+# --- the DASI2 VM's services (forwarded across the bridge) -----------------
+# localIP is the VM's address as the hypervisor sees it.  Give the VM a
+# fixed address (static or a DHCP reservation): if it moves, these two
+# proxies keep connecting to whoever now answers there.
+[[proxies]]
+name = "@PROXY@-vm-ssh"
+type = "tcp"
+localIP = "@VM_IP@"
+localPort = 22
+remotePort = 0   # <VM_SSH_REMOTEPORT_FROM_WD_ADMIN>
+
+[[proxies]]
+name = "@PROXY@-vm-web"
+type = "tcp"
+localIP = "@VM_IP@"
+localPort = 8081
+remotePort = 0   # <VM_WEB_REMOTEPORT_FROM_WD_ADMIN>

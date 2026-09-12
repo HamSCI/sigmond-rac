@@ -1,9 +1,17 @@
-# RAC (frpc) reverse-tunnel config TEMPLATE — DASI2 VM (guest) variant.
+# RAC (frpc) reverse-tunnel config TEMPLATE — station WITHOUT a hypervisor.
 # sigmond-rac/install.sh renders this to /etc/sigmond/frpc.toml.template with
 # this station's identity filled in.  To ACTIVATE, get this station's remote
 # port assignment from the WsprDaemon admin (Rob), fill the <...> values, then:
 #   sudo cp /etc/sigmond/frpc.toml.template /etc/sigmond/frpc.toml
 #   sudo systemctl restart wd-rac
+#
+# ON A DASI2 SITE, DO NOT ARM THIS ONE.  There the site's single login lives
+# on the Proxmox host (frpc-host.toml, installed by install-host.sh) and
+# forwards the VM's ports across the bridge, so the VM needs no tunnel of
+# its own.  The gateway files one key per login id, so arming both would get
+# whichever connects second refused — the guard, not a bug.  This template
+# is for a sigmond station that runs on bare metal with no hypervisor
+# beneath it.
 #
 # Gateway: sigmond stations tunnel to HamSCI's own server, vpn.hamsci.org,
 # not to WsprDaemon's gw2.  :35736 is its frps-secure instance (TLS forced,
@@ -19,8 +27,8 @@
 #
 # This tunnel carries what the STATION serves: sshd (vm-ssh), ka9q-web
 # (vm-web), and any further service it grows — add one [[proxies]] block per
-# service, named for its band.  The hypervisor's own sshd and Proxmox UI
-# belong to frpc-host.toml instead.
+# service, named for its band (e.g. vm-grape for the PSWS/GRAPE WWV carrier
+# charts on :8088).
 # remotePort(s) MUST be unique fleet-wide — never reuse another station's.
 # Proxy names are "<reporter ID>-<band>"; the rac-dashboard keys on those
 # band suffixes to group a station's tunnels, so do not rename them.
@@ -28,6 +36,10 @@
 serverAddr = "vpn.hamsci.org"
 serverPort = 35736
 user = "@USER@"
+
+# Reconnect forever instead of exiting when the gateway is unreachable at
+# startup.  Must stay above the first table header to be a top-level key.
+loginFailExit = false
 
 [auth]
 method = "token"
@@ -38,9 +50,6 @@ token = ""
 # encryption, and the TOFU pubkey below provides the identity.
 [transport.tls]
 enable = true
-
-# Reconnect forever instead of exiting when the gateway is unreachable.
-loginFailExit = false
 
 [metadatas]
 pubkey = "@PUBKEY@"

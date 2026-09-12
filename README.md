@@ -5,9 +5,11 @@ NAT'd station via **frpc reverse tunnels** to HamSCI's gateway,
 `vpn.hamsci.org:35736`.  Derived from the legacy wsprdaemon-client's
 `wd-rac`, repackaged so every sigmond install can carry it.
 
-A DASI2 site holds **two** tunnels: the Proxmox host publishes its sshd and
-the PVE web UI (`-host-ssh`, `-host-ui`), and the VM publishes the station's
-sshd and web (`-vm-ssh`, `-vm-web`).
+A DASI2 site holds **one** login, and it runs on the Proxmox host — the
+machine that is up when the VM is not.  It publishes the host's own sshd and
+PVE web UI (`-host-ssh`, `-host-ui`) over 127.0.0.1, plus the VM's sshd and
+web (`-vm-ssh`, `-vm-web`) forwarded across the bridge to the VM's address.
+A sigmond station with no hypervisor beneath it arms the guest unit instead.
 
 Docs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the tunnels, the
 gateway, and the access tiers fit together · [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
@@ -39,22 +41,25 @@ sudo systemctl restart wd-rac
 
 Until `/etc/sigmond/frpc.toml` exists the unit never starts (no fail-loop).
 
-## Proxmox HOST tunnel (install-host.sh)
+## DASI2 site tunnel (install-host.sh)
 
-A DASI2 site runs the station as a VM on a Proxmox host.  The guest RAC
-above covers only the VM — `install-host.sh` installs a SECOND,
-independent frpc **on the hypervisor** so the site stays reachable even
-when the VM is down or being rebuilt.  It publishes the host's own sshd
-and Proxmox VE web UI (`-host-ssh` / `-host-ui`), as unit
-`sigmond-rac-host.service`, gated on
-`/etc/sigmond/frpc-host.toml` (same inert-until-configured model; its
-remotePort must be distinct from the guest's).  Normally delivered and
-run by sigmond's proxmox bootstrap (`install_host_rac`); standalone:
+A DASI2 site runs the station as a VM on a Proxmox host, so the site's one
+frpc belongs on the **hypervisor**: a tunnel inside the guest would vanish
+exactly when it is most needed, while the VM is down or being rebuilt.
+`install-host.sh` installs it as unit `sigmond-rac-host.service`, gated on
+`/etc/sigmond/frpc-host.toml` (same inert-until-configured model).  Its four
+proxies reach the host over 127.0.0.1 and the VM over the bridge, so set
+`SIGMOND_VM_IP` (or `DASI_VM_IP` in `coordination.env`) to the VM's fixed
+address.  On such a site the guest tunnel stays unarmed — both claim the same
+login id, and the gateway refuses whichever connects second.  Normally
+delivered and run by sigmond's proxmox bootstrap (`install_host_rac`);
+standalone:
 
 ```bash
 # on the Proxmox host, from a sigmond-rac checkout:
 sudo bash install-host.sh
-# activate: fill /etc/sigmond/frpc-host.toml.template ->
+# activate: fill the <...> remote ports into
+#   /etc/sigmond/frpc-host.toml.template ->
 #   cp ... /etc/sigmond/frpc-host.toml && systemctl restart sigmond-rac-host
 ```
 

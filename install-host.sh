@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # sigmond-rac — install the Remote Access Channel on the PROXMOX HOST.
 #
-# The guest install (install.sh) tunnels the DASI2 VM; this installs a
-# SECOND, independent frpc on the hypervisor so the site stays reachable
-# even when the VM is down or being rebuilt.  Publishes the host's own
-# services: its sshd (host-ssh) and the Proxmox VE web UI (host-ui).  Same inert-until-configured model: the unit's
+# On a DASI2 site this is THE install: one frpc, one login, running on the
+# hypervisor — the machine that is up when the VM is not.  It carries the
+# host's own sshd (host-ssh) and Proxmox VE web UI (host-ui) over
+# 127.0.0.1, plus the DASI2 VM's sshd (vm-ssh) and web (vm-web) forwarded
+# across the bridge to the VM's address.  The guest install (install.sh) is
+# for a sigmond station with no hypervisor beneath it; on a DASI2 site its
+# tunnel is left unarmed, since the gateway files one key per login id and
+# the second claimant is refused.  Same inert-until-configured model: the unit's
 # ConditionPathExists keeps it dormant until the operator fills
 # /etc/sigmond/frpc-host.toml with the admin-assigned remotePorts (which
 # must be distinct from the guest's).
@@ -67,11 +71,9 @@ else
   log "  reporter ID (the same one the guest VM registers under) before"
   log "  activating the host tunnel."
 fi
-#    The hypervisor logs in to vpn.hamsci.org separately from the VM, and
-#    the gateway files ONE pubkey per user id — so this tunnel needs its own
-#    keypair and its own id, or it would collide with the VM's claim and be
-#    refused.  Prefer an assigned DASI number for the host; otherwise derive
-#    the "-host" counterpart of the VM's id.
+#    This is the site's single login, so it carries the site's identity:
+#    the assigned DASI number when there is one, else the reporter ID.  The
+#    keypair lives on the hypervisor because that is where the frpc runs.
 KEY=/etc/sigmond/frpc-host_id_ed25519
 if [ ! -f "$KEY.pub" ]; then
   ssh-keygen -q -t ed25519 -N '' -C "sigmond-rac-host@$(hostname -s)" -f "$KEY"
@@ -80,14 +82,27 @@ if [ ! -f "$KEY.pub" ]; then
 fi
 pubkey="$(cat "$KEY.pub")"
 
-dasi="${SIGMOND_DASI_HOST_ID:-${DASI_HOST_ID:-}}"
-[ -n "$dasi" ] || dasi="$(coord_get DASI_HOST_ID)"
+dasi="${SIGMOND_DASI_ID:-${DASI_ID:-}}"
+[ -n "$dasi" ] || dasi="$(coord_get DASI_ID)"
 if [ -n "$dasi" ]; then
   user="$dasi"
 elif [ "$proxy" != "<REPORTER_ID>" ]; then
-  user="${proxy}-host"
+  user="$proxy"
 else
   user="<DASI_ID_OR_STATION_ID>"
+fi
+
+#    The VM's address as the hypervisor sees it — the vm-ssh/vm-web proxies
+#    forward there instead of to 127.0.0.1.  It must be fixed (static lease
+#    or reservation): if the VM moves, those proxies would publish whoever
+#    now answers at the old address.
+vm_ip="${SIGMOND_VM_IP:-${DASI_VM_IP:-}}"
+[ -n "$vm_ip" ] || vm_ip="$(coord_get DASI_VM_IP)"
+if [ -z "$vm_ip" ]; then
+  vm_ip="<VM_IP>"
+  log "WARNING: the DASI2 VM's address is not configured — rendering the"
+  log "  template with a <VM_IP> placeholder.  Set SIGMOND_VM_IP (or"
+  log "  DASI_VM_IP in coordination.env), or fill it in before activating."
 fi
 
 tmpl="/etc/sigmond/frpc-host.toml.template"
@@ -95,10 +110,11 @@ sed -e "s|@PROXY@|${proxy}|g" \
     -e "s|@USER@|${user}|g" \
     -e "s|@SITE@|${proxy}|g" \
     -e "s|@DASI@|${dasi}|g" \
+    -e "s|@VM_IP@|${vm_ip}|g" \
     -e "s|@PUBKEY@|${pubkey}|g" \
     "$SCRIPT_DIR/config/frpc-host.toml.template" > "$tmpl"
 chmod 0640 "$tmpl"
-log "wrote $tmpl (proxy '${proxy}', gateway id '${user}')"
+log "wrote $tmpl (proxy '${proxy}', gateway id '${user}', VM at ${vm_ip})"
 
 # 5. enable (inert via ConditionPathExists until configured)
 systemctl daemon-reload 2>/dev/null || true

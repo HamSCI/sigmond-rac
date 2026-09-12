@@ -90,12 +90,15 @@ screen (operator UX) · the station's local sshd (port 22) and optional web
   there is no inbound requirement (that is the point).
 - `RAC-C-004` `[DOC]` ✅ Each station's `remotePort`(s) SHALL be **unique on the
   gateway**; reuse collides with another station and is an admin-allocation
-  invariant.  A site's host and VM tunnels are two clients and SHALL NOT
-  share a port.
+  invariant.
 - `RAC-C-007` `[NEW]` ✅ The gateway SHALL admit a login by trust-on-first-use
-  over the pubkey in `[metadatas]`: one key is filed per login id, so the
-  host and VM tunnels SHALL carry distinct ids, and re-keying a station
-  requires the admin to delete its registry entry.
+  over the pubkey in `[metadatas]`: one key is filed per login id, and
+  re-keying a site requires the admin to delete its registry entry.
+- `RAC-C-008` `[NEW]` ✅ A site SHALL hold exactly ONE login.  On a DASI2 site
+  it runs on the Proxmox host and forwards the VM's ports across the bridge;
+  the guest unit is for a station with no hypervisor and SHALL be left
+  unarmed there (both claim the site id, and the gateway refuses the second
+  claimant).
 - `RAC-C-005` `[NEW]` ✅ **Component vs service identity:** the component is
   `sigmond-rac`; the provisioned unit is `wd-rac.service`. The two names are
   distinct and SHALL NOT be conflated in catalog, docs, or tooling.
@@ -120,9 +123,11 @@ screen (operator UX) · the station's local sshd (port 22) and optional web
   in a default callsign (that is how wrong accounts end up on the gateway).
   Each rendered proxy SHALL be named `<reporter ID>-<band>` using the fleet
   band names (`-vm-ssh`, `-vm-web`; `-host-ssh` for the Proxmox host
-  variant), which is what the gw2 rac-dashboard keys on to group a station's
-  tunnels.  `install-host.sh` SHALL resolve identity the same way, so a
-  site's guest and host tunnels carry one identity.
+  variant), which is what the rac-dashboard keys on to group a site's
+  proxies.  `install-host.sh` SHALL resolve identity the same way, and SHALL
+  additionally resolve the DASI2 VM's address (`SIGMOND_VM_IP` / `DASI_VM_IP`,
+  else a `<VM_IP>` placeholder with a warning) as the target of the `vm-*`
+  proxies.
 - `RAC-F-004` `[DOC]` ✅ SHALL `daemon-reload` and `enable wd-rac.service` so RAC is
   part of the install footprint, without starting it.
 - `RAC-F-005` `[CODE]` ✅ SHALL (re)start `wd-rac.service` **iff**
