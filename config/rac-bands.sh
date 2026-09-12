@@ -18,12 +18,18 @@
 # this gateway and on gw2.  Do not invent one — an unlisted band must be
 # given its base explicitly (band:base=localport) and should be added here
 # once the WsprDaemon admin has allocated it.
+#
+# A base also decides WHO may reach the service, since the gateway filters by
+# port: the host_* bands are the ADMIN class (the hypervisor's shell and UI
+# are the keys to the site), the vm_* bands are the VPN class (any holder of
+# a WireGuard config), and a small deliberate range of web ports is PUBLIC.
+# Picking a base therefore picks an audience.
 rac_band_base() {
   case "$1" in
     vm_ssh)    echo 35800 ;;   # the station's shell
     vm_grape)  echo 40800 ;;   # PSWS/GRAPE WWV carrier charts (:8088)
     vm_web)    echo 45800 ;;   # ka9q-web (:8081)
-    vm_web2)   echo 46800 ;;   # 2nd RX888 web UI      -- see the warning below
+    vm_web2)   echo 46800 ;;   # 2nd RX888 web UI  -- PUBLIC range, see below
     vm_web3)   echo 47800 ;;   # 3rd RX888 web UI
     host_ssh)  echo 50800 ;;   # the hypervisor's shell
     host_ui)   echo 55800 ;;   # Proxmox VE web UI (:8006)
@@ -33,11 +39,12 @@ rac_band_base() {
   esac
 }
 #
-# WARNING: every tunnel port is meant to be reachable ONLY over WireGuard, at
-# 10.3.2.1:<port>.  One deviation exists today: the gateway also accepts
-# 46000-46999 from the open internet ("web tunnels"), which is the range a
-# vm_web2 port (46800 + n) lands in.  Until that rule is removed, treat that
-# band as public.
+# WARNING: 46000-46999 is the PUBLIC web range on vpn.hamsci.org — the
+# gateway accepts it from the open internet, by design, for the stations that
+# publish a web UI publicly.  vm_web2 (46800 + n) currently lands inside it,
+# so a second RX888 web UI would be world-reachable while vm_web (45800 + n)
+# is VPN-only.  Confirm with the admin before using vm_web2; it likely wants
+# a base outside the public range, or the range wants narrowing.
 
 # rac_render_proxies <proxy-name prefix> <site number|""> <vm address> <spec...>
 #

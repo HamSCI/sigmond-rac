@@ -94,6 +94,11 @@ screen (operator UX) · the station's local sshd (port 22) and optional web
 - `RAC-C-007` `[NEW]` ✅ The gateway SHALL admit a login by trust-on-first-use
   over the pubkey in `[metadatas]`: one key is filed per login id, and
   re-keying a site requires the admin to delete its registry entry.
+- `RAC-C-009` `[NEW]` 🟡 Port bands SHALL carry an access class enforced on the
+  gateway: `host_*` admin-only, `vm_*` reachable by any WireGuard holder, and
+  a small deliberate web range public.  Two WireGuard tiers therefore exist
+  (administrative and general).  *(gateway-side; today `wg0` is accepted flat
+  and the public range is 46000-46999 entire — `RAC-Q-012`.)*
 - `RAC-C-008` `[NEW]` ✅ A site SHALL hold exactly ONE login.  On a DASI2 site
   it runs on the Proxmox host and forwards the VM's ports across the bridge;
   the guest unit is for a station with no hypervisor and SHALL be left
@@ -277,6 +282,14 @@ new capability.
   visible via `systemctl status` / the local frpc webServer; there is no signal to
   sigmond that the tunnel is *up and reachable from gw2*. SHALL decide whether to
   add a minimal health probe or accept the systemd-only view.
+- `RAC-Q-012` `[NEW]` 🟡 **Access classes not yet enforced:** the gateway
+  accepts everything arriving on `wg0`, so a general WireGuard holder reaches
+  the `host_*` (admin) bands too.  Splitting the tiers is a gateway firewall
+  change — a second WireGuard interface filtered per interface, or per-tier
+  address ranges on `wg0` filtered on source address (sound here, since
+  WireGuard pins each peer to its `AllowedIPs`).  Separately, `vm_web2`
+  (46800 + n) falls inside the public 46000-46999 range: narrow the range or
+  rebase the band.
 - `RAC-Q-011` `[NEW]` ⬜ **Unverified vendored binaries:** the per-arch frpc blobs
   carry no recorded upstream checksum/signature. SHALL pin + verify against the
   frp release to close the supply-chain gap.

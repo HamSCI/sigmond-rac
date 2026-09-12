@@ -183,34 +183,58 @@ same bands, with the `vm_*` services on `127.0.0.1`.
 Re-running either installer is idempotent, rewrites only the *template*, and
 leaves an armed tunnel running.
 
-## Reaching a service
+## Who can reach what
 
-Every tunnel port is reachable **only** at the gateway's VPN address,
-`10.3.2.1`, and only by someone holding a WireGuard configuration for that
-server. There is no public path to a station: the gateway's firewall accepts
-everything arriving on `wg0` and, from the internet, only :22, :51820 and the
-two frps control ports — the ports stations dial *out* to. A service is
-therefore a port on the server's VPN tunnel address, nothing more.
+Ports fall into **three classes**, and a port's class is decided by the band
+it belongs to — so the number itself says who may reach it.
+
+| Class | Bands | Reachable by |
+|---|---|---|
+| **Admin** | `host_ssh` 50800 + n, `host_ui` 55800 + n | administrative users only — the hypervisor's shell and the Proxmox UI are the keys to the whole site |
+| **VPN** | `vm_ssh`, `vm_web`, `vm_grape`, … — the station's own services | anyone holding a WireGuard configuration for the gateway |
+| **Public** | a small, deliberate set of web ports (today the legacy 46000–46999 range) | the open internet |
+
+That implies **two WireGuard configurations**, not one: an administrative
+tier whose members reach every port, and a general tier whose members reach
+the station services but not the hypervisor. Everything else about the
+gateway is unchanged — stations still dial out, and no station is ever
+reachable directly.
+
+```
+admin WireGuard config ──► 10.3.2.1 : every port
+user  WireGuard config ──► 10.3.2.1 : vm_* ports only
+the open internet      ──► 10.3.2.1 : the public web ports, and nothing else
+```
+
+WsprDaemon's gw2 already works this way — `wd-mesh` for admins, `wd-rac` for
+station operators, `wd-sonde` for sonde watchers — enforced with
+per-interface firewall rules. The HamSCI gateway can reach the same end
+either by running a second WireGuard interface and filtering per interface,
+or by allocating each tier its own address range on the existing `wg0` and
+filtering on source address. The second is sound here rather than merely
+convenient: WireGuard pins every peer to its `AllowedIPs`, so a peer cannot
+present another tier's source address.
+
+**State today:** not yet split. The gateway's ruleset accepts everything
+arriving on `wg0`, so any WireGuard holder reaches the hypervisor bands too,
+and the public range is `46000–46999` as a whole. Two things follow:
+
+- The admin/user split is a firewall change on the gateway, not a client
+  change. Nothing in this repo needs to move for it.
+- **`vm_web2` (46800 + n) sits inside the public range.** As things stand a
+  second RX888 web UI would be world-reachable while `vm_web` (45800 + n) is
+  not. Either the public range wants narrowing to the legacy stations that
+  actually use it, or `vm_web2` wants a base outside it — an allocation
+  decision for the admin, flagged here rather than guessed at.
 
 ```bash
-ssh -p $((35800 + n)) <station-user>@10.3.2.1     # the DASI2 VM
-ssh -p $((50800 + n)) root@10.3.2.1               # the Proxmox host
-https://10.3.2.1:$((55800 + n))                   # the Proxmox VE UI
+ssh -p $((35800 + n)) <station-user>@10.3.2.1     # the DASI2 VM      (VPN tier)
+ssh -p $((50800 + n)) root@10.3.2.1               # the Proxmox host  (admin tier)
+https://10.3.2.1:$((55800 + n))                   # the Proxmox VE UI (admin tier)
 ```
 
 Reusing another site's port collides on the gateway (`RAC-C-004`); frps is
 the final arbiter and rejects the proxy with `port already used`.
-
-One deviation from that rule exists today and is worth knowing about while
-it lasts: the gateway's persisted ruleset also accepts **46000–46999** from
-the internet (`# web tunnels`), which currently exposes a handful of legacy
-HamSCI stations' web UIs directly — and is the range `vm_web2` (46800 + n)
-would land in. The intent is that this closes, leaving every port VPN-only;
-until it does, treat that band as public.
-
-On the WsprDaemon side the same role is played by that gateway's tiers
-(`wd-mesh` 10.112.0.2 for admins, `wd-rac` 10.111.220.1 for station
-operators), enforced with per-interface firewall rules.
 
 ## Observability
 
@@ -235,6 +259,11 @@ why.
 
 ## Open items
 
+- **Access classes are not enforced yet.** `wg0` is accepted flat on the
+  gateway, so today a general WireGuard holder reaches the admin bands too.
+  A firewall change, not a client change.
+- **`vm_web2` overlaps the public range.** Narrow 46000–46999, or rebase the
+  band.
 - **Single gateway.** Adopting the per-gateway instance model would need a
   second HamSCI frps; the client side is a templated unit away.
 - **Port allocation is manual.** There is no registrar in the TOFU model, so
