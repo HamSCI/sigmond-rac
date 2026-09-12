@@ -6,6 +6,9 @@
 #   sudo systemctl restart wd-rac
 # serverAddr/serverPort + the TLS CA are shared across the fleet.
 # remotePort(s) MUST be unique per station on gw2 — never reuse another's.
+# Proxy names are "<reporter ID>-<band>" using the fleet band names
+# (vm-ssh, vm-web, host-ssh, host-ui) — the gw2 rac-dashboard keys on those
+# suffixes to group a station's tunnels, so do not rename them.
 
 serverAddr = "gw2.wsprdaemon.org"
 serverPort = 35736
@@ -24,14 +27,14 @@ addr = "127.0.0.1"
 port = 7500
 
 [[proxies]]
-name = "@PROXY@"
+name = "@PROXY@-vm-ssh"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 22
 remotePort = 0   # <SSH_REMOTEPORT_FROM_WD_ADMIN>
 
 [[proxies]]
-name = "@PROXY@-WEB"
+name = "@PROXY@-vm-web"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 8081

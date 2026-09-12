@@ -43,9 +43,30 @@ install -m 0644 -o root -g root "$SCRIPT_DIR/systemd/sigmond-rac-host.service" \
         /etc/systemd/system/sigmond-rac-host.service
 
 # 4. render the host-specific template (proxy name from identity)
-call="${STATION_CALL:-AC0G}"
-site="${SIGMOND_SITE:-$(hostname -s 2>/dev/null || echo host)}"
-proxy="${call}/$(printf '%s' "$site" | tr '[:lower:]' '[:upper:]')-HOST"
+#    Same identity as the guest: the proxy name is the station's reporter ID
+#    with the band suffix the gw2 rac-dashboard keys on ("-host-ssh" is
+#    added by the template).  Resolve from the env (the proxmox bootstrap
+#    passes the identity bag through), else the station's coordination.env.
+#    No default callsign: a wrong one here books this hypervisor onto
+#    someone else's account on the gateway.
+coord_get() {
+  sed -n "s/^$1=//p" /etc/sigmond/coordination.env 2>/dev/null \
+    | head -1 | tr -d "\"'"
+}
+call="${STATION_REPORTER_ID:-${STATION_CALL:-}}"
+if [ -z "$call" ]; then
+  call="$(coord_get STATION_REPORTER_ID)"
+  [ -n "$call" ] || call="$(coord_get STATION_CALL)"
+fi
+if [ -n "$call" ]; then
+  proxy="$call"
+else
+  proxy="<REPORTER_ID>"
+  log "WARNING: station reporter ID not configured — rendering the template"
+  log "  with a <REPORTER_ID> placeholder.  Fill it in with the station's"
+  log "  reporter ID (the same one the guest VM registers under) before"
+  log "  activating the host tunnel."
+fi
 tmpl="/etc/sigmond/frpc-host.toml.template"
 sed "s|@PROXY@|${proxy}|g" "$SCRIPT_DIR/config/frpc-host.toml.template" > "$tmpl"
 chmod 0640 "$tmpl"

@@ -14,9 +14,9 @@ gateway, and the access tiers fit together · [docs/REQUIREMENTS.md](docs/REQUIR
 - `/etc/sigmond/frps-ca.crt` — frps TLS CA
 - `/etc/systemd/system/wd-rac.service` — the tunnel unit (enabled, but inert
   via `ConditionPathExists=/etc/sigmond/frpc.toml`)
-- `/etc/sigmond/frpc.toml.template` — station-specific, with the proxy name
-  filled from `STATION_CALL`/instance; `<...>` placeholders for the gw2
-  assignment
+- `/etc/sigmond/frpc.toml.template` — station-specific, with the proxy names
+  filled in as `<reporter ID>-vm-ssh` / `-vm-web` (the band suffixes the gw2
+  rac-dashboard groups on); `<...>` placeholders for the gw2 assignment
 
 ## Activating
 The per-station `user`, `token`, and **unique** `remotePort`(s) are assigned on

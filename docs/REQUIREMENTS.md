@@ -111,6 +111,11 @@ screen (operator UX) · the station's local sshd (port 22) and optional web
   identity), so no host/instance suffix is appended.  When no identity is
   configured, render a `<REPORTER_ID>` placeholder and warn — SHALL NOT bake
   in a default callsign (that is how wrong accounts end up on the gateway).
+  Each rendered proxy SHALL be named `<reporter ID>-<band>` using the fleet
+  band names (`-vm-ssh`, `-vm-web`; `-host-ssh` for the Proxmox host
+  variant), which is what the gw2 rac-dashboard keys on to group a station's
+  tunnels.  `install-host.sh` SHALL resolve identity the same way, so a
+  site's guest and host tunnels carry one identity.
 - `RAC-F-004` `[DOC]` ✅ SHALL `daemon-reload` and `enable wd-rac.service` so RAC is
   part of the install footprint, without starting it.
 - `RAC-F-005` `[CODE]` ✅ SHALL (re)start `wd-rac.service` **iff**

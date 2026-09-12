@@ -8,6 +8,10 @@
 #   cp /etc/sigmond/frpc-host.toml.template /etc/sigmond/frpc-host.toml
 #   systemctl restart sigmond-rac-host
 # serverAddr/serverPort + the TLS CA are shared across the fleet.
+# The proxy name is "<reporter ID>-host-ssh": the SAME station identity as
+# the guest, with the band suffix marking it as the hypervisor's sshd.  That
+# is what groups a site's guest and host tunnels together on the gw2
+# rac-dashboard, so do not rename it.
 
 serverAddr = "gw2.wsprdaemon.org"
 serverPort = 35736
@@ -26,7 +30,7 @@ addr = "127.0.0.1"
 port = 7500
 
 [[proxies]]
-name = "@PROXY@"
+name = "@PROXY@-host-ssh"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 22

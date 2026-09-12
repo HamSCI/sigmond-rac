@@ -79,8 +79,9 @@ gateway, none of them aware of the others.
   number against every registered and currently-connected client and rejects
   collisions with a 409.
 - The proxy name is the station's identity on the gateway, and must be
-  fleet-unique. sigmond uses the bare reporter ID — the same string the
-  station uploads to wsprnet.org under — resolved from
+  fleet-unique. sigmond uses the reporter ID — the same string the station
+  uploads to wsprnet.org under — plus the band suffix of the tunnel
+  (`-vm-ssh`, `-vm-web`, `-host-ssh`), resolved from
   `STATION_REPORTER_ID` / `STATION_CALL` in the environment, else
   `/etc/sigmond/coordination.env`. With no identity configured the installer
   renders a `<REPORTER_ID>` placeholder and warns rather than baking in a
@@ -107,7 +108,10 @@ wd-rac-client receives this whole table from the registrar and builds one
 — which is how the station appears on the gateway's **rac-dashboard**
 automatically.
 
-sigmond-rac does not compute ports: the `user`, `token`, and each unique
+sigmond-rac names its proxies the same way — `<reporter ID>-vm-ssh`,
+`-vm-web`, `-host-ssh` — so a station groups on the dashboard like the rest
+of the fleet, keyed to the reporter ID it uploads to wsprnet.org under. What
+it does not do is compute ports: the `user`, `token`, and each unique
 `remotePort` are allocated by the WsprDaemon admin and pasted into the
 config. Reusing another station's port collides on the gateway and is the
 one allocation invariant an operator can break (`RAC-C-004`); frps is the
@@ -127,8 +131,10 @@ UI lives in the guest. It is normally delivered and run by sigmond's proxmox
 bootstrap (`install_host_rac`), and runs standalone from a checkout too.
 
 In band terms the host tunnel is `host_ssh` (50800 + RAC): the same station,
-its hypervisor port, not a second RAC number. Claiming it that way is what
-lets one station's guest and host sit together on the dashboard.
+its hypervisor port, not a second RAC number — which is why its proxy is
+named `<reporter ID>-host-ssh`, carrying the station's identity with the
+band suffix that marks it as the hypervisor. That is what lets a site's
+guest and host sit together on the dashboard.
 
 ## Inert by design
 
@@ -187,14 +193,20 @@ rather than a redesign:
 | Arming | installer registers and starts the tunnel, confirming it came up | **inert until armed** by an explicit operator action |
 | frpc binary | downloaded from the frp release for the local arch | **vendored** per-arch blobs in `bin/` (no network, but unpinned — `RAC-Q-011`) |
 | Transport | `transport.tls.enable`, `loginFailExit = false` so an unreachable gateway at boot is retried in-process | TLS with a **pinned CA** (`trustedCaFile`) — stricter — but no `loginFailExit`, so a gateway down at boot costs a 30 s systemd restart cycle |
-| Privilege | frpc runs as a dedicated `wd-rac` system user with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome` | frpc runs as **root** with no sandboxing |
-| Proxy names | `<site>-vm-ssh`, `<site>-vm-web`, … — the suffixes the rac-dashboard keys on | `<reporter-id>` and `<reporter-id>-WEB` — the station will not group on the dashboard the way the rest of the fleet does |
+| Privilege | frpc runs as a dedicated `wd-rac` system user with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome` | frpc runs as **root** — deliberate, see below |
+| Proxy names | `<site>-vm-ssh`, `<site>-vm-web`, … — the suffixes the rac-dashboard keys on | same band suffixes, keyed to the reporter ID |
 | Upgrades | add-before-remove under a 10-minute dead-man rollback timer, because the tunnel being replaced is usually the only way in | re-run `install.sh`; an armed tunnel keeps running, but there is no rollback rail |
 
-Two of these are worth treating as defects rather than choices: the proxy
-naming (a station that does not show up correctly on the dashboard is
-invisible to the people who watch the fleet) and running frpc as root when
-the reference client demonstrates it needs no privileges at all.
+**On running frpc as root.** wd-rac-client's target is a dedicated Pi where
+a `wd-rac` system user costs nothing. A DASI2 Proxmox host is a different
+machine: it is administered as root and carries no ordinary user accounts,
+and adding one solely so a tunnel client can drop privileges buys a small
+amount of sandboxing at the price of an account that has to be created,
+understood, and maintained on every hypervisor in the fleet. sigmond-rac
+runs frpc as root on purpose. If the sandboxing is wanted later, the
+cheaper route is systemd's own confinement on the existing unit —
+`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`,
+`PrivateTmp` — with no new account anywhere.
 
 ## Related repositories
 

@@ -40,8 +40,10 @@ install -m 0644 -o root -g root "$SCRIPT_DIR/systemd/wd-rac.service" \
 #    The proxy name IS the station's reporter ID, exactly — the unique
 #    identity it uploads to wsprnet.org under.  No host/instance suffix:
 #    reporter IDs are already fleet-unique, and the gw2 entries must match
-#    them.  Resolve from the env (smd install passes the identity bag
-#    through), else the station's coordination.env.  When neither defines
+#    them.  The template appends the fleet band suffix per tunnel
+#    (-vm-ssh, -vm-web), which is what the gw2 rac-dashboard keys on to
+#    group a station's tunnels.  Resolve from the env (smd install passes
+#    the identity bag through), else the station's coordination.env.  When neither defines
 #    it, render a placeholder and warn — the operator must configure
 #    identity BEFORE the RAC can be activated or registered; baking in a
 #    default callsign here is how wrong accounts end up on the gateway.
