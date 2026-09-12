@@ -85,10 +85,17 @@ screen (operator UX) · the station's local sshd (port 22) and optional web
   via sudo by `smd install`.
 - `RAC-C-002` `[CODE]` ✅ The host arch SHALL be one of amd64/arm64/armhf with a
   matching vendored `frpc-<arch>-v<ver>` binary; unsupported arch is a hard fail.
-- `RAC-C-003` `[DOC]` ✅ The station SHALL have outbound reachability to
-  `gw2.wsprdaemon.org:35736`; there is no inbound requirement (that is the point).
-- `RAC-C-004` `[DOC]` ✅ Each station's `remotePort`(s) SHALL be **unique on gw2**;
-  reuse collides with another station and is an admin-allocation invariant.
+- `RAC-C-003` `[DOC]` ✅ The station SHALL have outbound reachability to its
+  gateway — `vpn.hamsci.org:35736` (frps-secure) for sigmond/DASI2 stations;
+  there is no inbound requirement (that is the point).
+- `RAC-C-004` `[DOC]` ✅ Each station's `remotePort`(s) SHALL be **unique on the
+  gateway**; reuse collides with another station and is an admin-allocation
+  invariant.  A site's host and VM tunnels are two clients and SHALL NOT
+  share a port.
+- `RAC-C-007` `[NEW]` ✅ The gateway SHALL admit a login by trust-on-first-use
+  over the pubkey in `[metadatas]`: one key is filed per login id, so the
+  host and VM tunnels SHALL carry distinct ids, and re-keying a station
+  requires the admin to delete its registry entry.
 - `RAC-C-005` `[NEW]` ✅ **Component vs service identity:** the component is
   `sigmond-rac`; the provisioned unit is `wd-rac.service`. The two names are
   distinct and SHALL NOT be conflated in catalog, docs, or tooling.

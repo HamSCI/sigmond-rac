@@ -4,7 +4,7 @@ Documentation=https://github.com/HamSCI/sigmond-rac
 After=network-online.target
 Wants=network-online.target
 # Stays inert until configured: frpc.toml only exists once the operator fills
-# in the gw2 user/token/remotePort assignment from the WsprDaemon admin.
+# in the remotePort assignment from the WsprDaemon admin.
 ConditionPathExists=/etc/sigmond/frpc.toml
 
 [Service]

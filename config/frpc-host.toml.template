@@ -1,29 +1,46 @@
 # RAC (frpc) reverse-tunnel config TEMPLATE — PROXMOX HOST variant.
 # install-host.sh renders this to /etc/sigmond/frpc-host.toml.template with
-# the host's proxy name filled in.  The HOST tunnel exists so the site stays
-# reachable even when the DASI2 VM is down or being rebuilt — it publishes
-# the HOST's own sshd only (no web proxy; ka9q-web lives in the guest).
-# To ACTIVATE, get this host's gw2 assignment from the WsprDaemon admin
-# (its remotePort must be distinct from the guest VM's), then:
+# the hypervisor's identity filled in.  The HOST tunnel exists so the site
+# stays reachable even when the DASI2 VM is down or being rebuilt, so it
+# carries the HOST's own services: its sshd (host-ssh) and the Proxmox VE
+# web UI (host-ui).  Everything the station serves belongs to the VM's
+# tunnel (frpc.toml) instead.
+# To ACTIVATE, get this host's remote port assignment from the WsprDaemon
+# admin (its ports must be distinct from the guest VM's), then:
 #   cp /etc/sigmond/frpc-host.toml.template /etc/sigmond/frpc-host.toml
 #   systemctl restart sigmond-rac-host
-# serverAddr/serverPort + the TLS CA are shared across the fleet.
-# The proxy name is "<reporter ID>-host-ssh": the SAME station identity as
-# the guest, with the band suffix marking it as the hypervisor's sshd.  That
-# is what groups a site's guest and host tunnels together on the gw2
-# rac-dashboard, so do not rename it.
+#
+# Gateway and auth are identical to the guest tunnel: vpn.hamsci.org:35736
+# (frps-secure, TLS forced, trust-on-first-use, no registrar).  This tunnel
+# is a SEPARATE login with its OWN keypair, so it needs its own user id —
+# the gateway files one pubkey per user id and refuses a second key
+# claiming the same one.
+# Proxy names are "<reporter ID>-<band>": the same station identity as the
+# VM's tunnel, with the band suffix marking which hypervisor service it is.
+# That is what groups a site's host and VM tunnels together on the
+# rac-dashboard, so do not rename them.
 
-serverAddr = "gw2.wsprdaemon.org"
+serverAddr = "vpn.hamsci.org"
 serverPort = 35736
-user = "<RAC_USER_FROM_WD_ADMIN>"
+user = "@USER@"
 
 [auth]
 method = "token"
-token = "<RAC_TOKEN_FROM_WD_ADMIN>"
+token = ""
 
+# frps-secure forces TLS; its certificate is self-signed and no CA is
+# published, so there is nothing to pin — identity comes from the TOFU
+# pubkey below, not from the certificate.
 [transport.tls]
 enable = true
-trustedCaFile = "/etc/sigmond/frps-ca.crt"
+
+# Reconnect forever instead of exiting when the gateway is unreachable.
+loginFailExit = false
+
+[metadatas]
+pubkey = "@PUBKEY@"
+site = "@SITE@"
+dasi = "@DASI@"
 
 [webServer]
 addr = "127.0.0.1"
@@ -34,4 +51,13 @@ name = "@PROXY@-host-ssh"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 22
-remotePort = 0   # <SSH_REMOTEPORT_FROM_WD_ADMIN — unique, ≠ the guest VM's>
+remotePort = 0   # <HOST_SSH_REMOTEPORT_FROM_WD_ADMIN — unique, ≠ the guest VM's>
+
+# Proxmox VE web UI (https), so the hypervisor can be driven from a browser
+# when the VM is down or being rebuilt — the case this tunnel exists for.
+[[proxies]]
+name = "@PROXY@-host-ui"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8006
+remotePort = 0   # <HOST_UI_REMOTEPORT_FROM_WD_ADMIN>

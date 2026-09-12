@@ -1,222 +1,211 @@
 # sigmond-rac — Architecture
 
-How a sigmond/DASI2 station behind NAT becomes reachable by the WsprDaemon
-admin, without port forwarding, a public IP, or anything new listening on
-the open internet.
+How a sigmond/DASI2 station behind NAT becomes reachable by its
+administrators, without port forwarding, a public IP, or anything new
+listening on the open internet.
 
-This component is the sigmond-packaged member of the WsprDaemon **Remote
-Access Client** family; the reference implementation of the same
-architecture is
-[wd-rac-client](https://github.com/rrobinett/wd-rac-client). The model
-below is that architecture; the last section records, honestly, where
-sigmond-rac currently sits short of it.
+Every Remote Access Channel in the WsprDaemon/HamSCI world is the same
+trick: an `frpc` process on the station dials **out** to a gateway's `frps`
+and holds the connection open, and the gateway republishes the station's
+local services at remote ports. What differs between deployments is *which
+gateway*, *how the station proves who it is*, and *how many connections a
+site holds*.
+
+## Two deployments, two shapes
+
+| | WsprDaemon station | sigmond / DASI2 station (this repo) |
+|---|---|---|
+| Client | [wd-rac-client](https://github.com/rrobinett/wd-rac-client) | sigmond-rac |
+| Gateway | `gw2.wsprdaemon.org` (+ `gw1` standby) | `vpn.hamsci.org` |
+| Admission | registrar assigns the RAC number and ports; frps auth plugin checks the key against a registered account | trust-on-first-use: the pubkey in the login metadata claims a user id; **no registrar, no accounts** |
+| Connections per site | **one** | **two** |
+| What rides them | ssh, ka9q-web, and — where configured — the PSWS/GRAPE WWV carrier charts, all on the single connection | hypervisor: ssh + Proxmox UI · VM: ssh, web, and whatever the station grows |
+
+There is no host/hypervisor in the WsprDaemon case — the station *is* the
+machine, so one frpc with several proxies covers it. A DASI2 site is a
+Proxmox host running the station as a VM, so it holds two independent
+tunnels: one for the hypervisor, one for the guest.
 
 ## The picture
 
 ```
- DASI2 site (behind NAT)                     gw2.wsprdaemon.org               Operators
-┌────────────────────────────────┐        ┌────────────────────────────┐
-│ Proxmox host                   │        │  frps-secure :35736        │
-│  ├ sshd :22                    │outbound│   TLS + fleet token +      │
-│  └ frpc  sigmond-rac-host  ────┼───────►│   ssh-key auth plugin      │
-│                                │  TLS   │                            │
-│ DASI2 VM (guest)               │        │  vm_ssh   35800+RAC  ◄─────┼── ssh -p 35800+RAC user@10.111.220.1
-│  ├ sshd :22                    │        │  vm_web   45800+RAC  ◄─────┼── http://10.111.220.1:45800+RAC
-│  ├ web  :8081 (ka9q-web)       │        │  host_ssh 50800+RAC  ◄─────┼── ssh -p 50800+RAC root@10.111.220.1
-│  └ frpc  wd-rac.service   ─────┼───────►│                            │
-│                                │  TLS   │  rac-registrar :35737      │    WireGuard tiers:
-│ frpc status UI 127.0.0.1:7500  │        │  rac-dashboard :50080      │     wd-mesh 10.112.0.2   admins
-└────────────────────────────────┘        └────────────────────────────┘     wd-rac  10.111.220.1 operators
+ DASI2 site (behind NAT)                    vpn.hamsci.org                     Admins
+┌────────────────────────────────┐      ┌─────────────────────────────┐
+│ Proxmox host                   │      │  frps-secure :35736         │
+│  ├ sshd  :22       ──host-ssh──┼──┐   │   TLS forced + TOFU plugin  │
+│  ├ PVE UI:8006     ──host-ui───┼──┤   │                             │
+│  └ frpc  sigmond-rac-host      │  └──►│  frps (legacy open) :35735  │
+│                                │ TLS  │   older HamSCI stations     │
+│ DASI2 VM (guest)               │      │                             │
+│  ├ sshd  :22       ──vm-ssh────┼──┐   │  tunnel ports 35800–49999 ◄─┼── admins, over WireGuard
+│  ├ ka9q-web :8081  ──vm-web────┼──┤   │                             │
+│  └ frpc  wd-rac.service        │  └──►│  WireGuard :51820           │
+│                                │ TLS  │   admins only — 10.3.2.1    │
+└────────────────────────────────┘      └─────────────────────────────┘
 ```
 
-Each `frpc` makes an **outbound** TLS connection to the gateway's
-[frp](https://github.com/fatedier/frp) server and holds it open, retrying
-forever. The gateway republishes the station's local services at remote
-ports that belong to that station alone. Operators reach those ports only
-over one of the gateway's WireGuard tiers — the tunnel ports are firewalled
-off the open internet.
+Two frpc processes, two logins, two identities — but one station: both
+tunnels carry the **same reporter ID** in their proxy names, so the gateway
+and its dashboard show a site's hypervisor and VM together.
 
-Nothing on the station starts listening on a new port: frpc's own status UI
-is bound to `127.0.0.1:7500`, and sshd is reached through the tunnel (and
-however it was already reachable on the site LAN).
+Volunteers' stations never run WireGuard; admins never run frpc. The
+gateway is the only place the two meet, and its tunnel ports are reachable
+only from the admin VPN.
 
-## One frpc process per tunnel, driven by systemd
+## Identity: trust on first use
 
-A tunnel is a config file plus a systemd unit that runs
-`frpc -c <config>` with `Restart=always`. There is no daemon logic of our
-own: recovery is systemd restarting frpc, and frpc reconnecting.
+`vpn.hamsci.org` runs **two** frps instances. `:35735` is the original open
+one that older HamSCI volunteer stations still use. `:35736` is
+`frps-secure`, which forces TLS and gates every login through a TOFU auth
+plugin — this is the one sigmond stations use, and it needs no registrar
+and creates no accounts.
 
-| Tunnel | Unit | Config | Publishes |
-|---|---|---|---|
-| guest VM | `wd-rac.service` | `/etc/sigmond/frpc.toml` | VM sshd :22, web :8081 |
-| Proxmox host | `sigmond-rac-host.service` | `/etc/sigmond/frpc-host.toml` | host sshd :22 |
+An frpc login is admitted when:
 
-wd-rac-client uses the same shape with a **templated** unit,
-`wd-remote-access@<gateway>.service`, whose instance name selects
-`/etc/wd-remote-access/gateways/<gateway>.toml`. That is what makes
-multi-gateway cheap: the same identity, the same proxies, one instance per
-gateway, none of them aware of the others.
+1. it carries a **user id** and a **pubkey** in `[metadatas]`; and
+2. either that user id has never been seen — the gateway **files** the key
+   against it, first come first served — or the presented key **matches**
+   the one already on file.
 
-## Identity and registration
+A different key claiming a taken id is refused. So the pubkey is the
+identity, and the frps `token` is not the gate at all: it is empty by
+design. Nothing secret goes into `frpc.toml` — a stolen config lets nobody
+in, because the private key never leaves the station.
 
-- The station's identity **is** an ed25519 keypair generated at install
-  (`/etc/sigmond/frpc_id_rsa`; `/etc/wd-remote-access/id_ed25519` in
-  wd-rac-client). The gateway's frps auth plugin accepts an frpc login only
-  when its `user` field corresponds to a **registered** public key, so an
-  unregistered station cannot connect no matter what else it presents.
-- The fleet `token` in the config is therefore not the real gate, and
-  revocation is the admin removing the key on the gateway — not rotating a
-  shared secret.
-- sigmond registers the key through `smd admin rac register`, which uploads
-  it under the station's **reporter ID** to the gateway's registration drop;
-  the gateway auto-provisions the account and `authorized_keys` from there.
-  Registration is idempotent (`/etc/sigmond/.rac-registered`), and failure
-  is loud but never fails the install.
-- wd-rac-client instead POSTs `{site, pubkey, rac?}` to the **RAC registrar**
-  (`http://gw2.wsprdaemon.org:35737/register`) and gets back, in one answer:
-  the frps address and port, the fleet token, its `user` id, the gateway
-  list, and its port in every band. The registrar validates the claimed RAC
-  number against every registered and currently-connected client and rejects
-  collisions with a 409.
-- The proxy name is the station's identity on the gateway, and must be
-  fleet-unique. sigmond uses the reporter ID — the same string the station
-  uploads to wsprnet.org under — plus the band suffix of the tunnel
-  (`-vm-ssh`, `-vm-web`, `-host-ssh`), resolved from
-  `STATION_REPORTER_ID` / `STATION_CALL` in the environment, else
-  `/etc/sigmond/coordination.env`. With no identity configured the installer
-  renders a `<REPORTER_ID>` placeholder and warns rather than baking in a
-  default callsign; that is how wrong accounts end up on the gateway.
+Two consequences worth knowing before they bite:
 
-## Ports: one number per station, one band per service
+- **The hypervisor and the VM need separate ids.** One key is filed per user
+  id, so two tunnels sharing an id would see the second refused as an
+  impersonation attempt. sigmond-rac gives each its own keypair and its own
+  id: the assigned DASI number when there is one
+  (`SIGMOND_DASI_ID` / `SIGMOND_DASI_HOST_ID`, or `DASI_ID` / `DASI_HOST_ID`
+  in `coordination.env`), otherwise `<reporter ID>-vm` and
+  `<reporter ID>-host`.
+- **Re-keying needs an admin.** Reinstall a station from scratch and it
+  generates a new keypair; the gateway still holds the old one against that
+  id and refuses the new key. The admin deletes the registry entry — which
+  is also how access is revoked.
 
-A station has a single **RAC number**, and every service it publishes is
-that number plus a band base. The ports are derived, never negotiated:
+TLS is forced by the server, but its certificate is self-signed and no CA
+is published, so the client enables TLS without pinning a `trustedCaFile`.
+Encryption comes from TLS; identity comes from the key.
 
-| Band | Remote port | Local service |
-|---|---|---|
-| `vm_ssh` | 35800 + RAC | sshd :22 |
-| `vm_grape` | 40800 + RAC | GRAPE carrier strip charts :8088 |
-| `vm_web` | 45800 + RAC | ka9q-web :8081 |
-| `vm_web2` / `vm_web3` | 46800 / 47800 + RAC | 2nd / 3rd RX888 web UI |
-| `host_ssh` | 50800 + RAC | hypervisor sshd |
-| `host_ui` | 55800 + RAC | hypervisor UI |
+## What rides each connection
 
-wd-rac-client receives this whole table from the registrar and builds one
-`[[proxies]]` block per band it was asked to expose
-(`WD_RAC_PROXIES="vm_ssh=22 vm_web=8081"`), naming each proxy
-`<site>-<band>` with dashes — `SITE-vm-ssh`, `SITE-vm-web`, `SITE-host-ssh`
-— which is how the station appears on the gateway's **rac-dashboard**
-automatically.
+| Tunnel | Unit | Config | Proxy | Local |
+|---|---|---|---|---|
+| hypervisor | `sigmond-rac-host.service` | `/etc/sigmond/frpc-host.toml` | `<reporter ID>-host-ssh` | sshd :22 |
+| | | | `<reporter ID>-host-ui` | Proxmox VE web UI :8006 |
+| VM | `wd-rac.service` | `/etc/sigmond/frpc.toml` | `<reporter ID>-vm-ssh` | sshd :22 |
+| | | | `<reporter ID>-vm-web` | ka9q-web :8081 |
 
-sigmond-rac names its proxies the same way — `<reporter ID>-vm-ssh`,
-`-vm-web`, `-host-ssh` — so a station groups on the dashboard like the rest
-of the fleet, keyed to the reporter ID it uploads to wsprnet.org under. What
-it does not do is compute ports: the `user`, `token`, and each unique
-`remotePort` are allocated by the WsprDaemon admin and pasted into the
-config. Reusing another station's port collides on the gateway and is the
-one allocation invariant an operator can break (`RAC-C-004`); frps is the
-final arbiter and rejects the proxy with `port already used`.
+The hypervisor tunnel exists for the case where remote hands matter most —
+**the VM is down or being rebuilt** — which is why it carries the Proxmox UI
+as well as ssh: a browser onto the hypervisor can rebuild what ssh cannot.
 
-## Two tunnels per site — guest and hypervisor
+The VM tunnel carries whatever the station serves, and that list is open:
+a further service gets one more `[[proxies]]` block named for its band, in
+`frpc.toml`. WsprDaemon stations already do this for the PSWS/GRAPE WWV
+carrier charts (`vm-grape`, local :8088); a DASI2 station that grows one
+follows the same pattern.
 
-A DASI2 site runs the station as a KVM guest on a Proxmox host. The guest
-tunnel covers only the VM, so `install-host.sh` installs a **second,
-independent** frpc on the hypervisor: separate config, separate unit,
-separate proxy name, and a `remotePort` that must differ from the guest's,
-because to the gateway these are two different clients.
+The band suffixes (`-vm-ssh`, `-vm-web`, `-host-ssh`, `-host-ui`) are not
+decoration: the rac-dashboard keys on them to group a site's tunnels. The
+gateway prefixes each with the login id, so a site shows up there as
+`DASI-099.AI6VN-vm-ssh` and friends.
 
-That tunnel exists for the case where remote hands matter most — **the VM
-is down or being rebuilt** — and it publishes the host's sshd only; the web
-UI lives in the guest. It is normally delivered and run by sigmond's proxmox
-bootstrap (`install_host_rac`), and runs standalone from a checkout too.
+Nothing on the station starts listening on a new port as a result: frpc's
+own status UI is bound to `127.0.0.1:7500`, and sshd is reached through the
+tunnel (and however it was already reachable on the site LAN).
 
-In band terms the host tunnel is `host_ssh` (50800 + RAC): the same station,
-its hypervisor port, not a second RAC number — which is why its proxy is
-named `<reporter ID>-host-ssh`, carrying the station's identity with the
-band suffix that marks it as the hypervisor. That is what lets a site's
-guest and host sit together on the dashboard.
+## Ports
+
+Remote ports are assigned by the WsprDaemon admin and pasted into the
+config; this component never picks one. The gateway accepts tunnel ports in
+**35800–49999**, and the fleet convention is one number per station with a
+base per band — `35800 + n` for ssh, `45800 + n` for web, and so on, the
+scheme wd-rac-client's registrar hands out automatically. A site's two
+tunnels must not share a port: to the gateway they are two clients.
+
+Reusing another station's port collides on the gateway (`RAC-C-004`); frps
+is the final arbiter and rejects the proxy with `port already used`.
 
 ## Inert by design
 
 Every sigmond install carries the full RAC footprint — the per-arch vendored
-`frpc` (amd64 / arm64 / armhf, no build step, no download), the pinned frps
-CA, the unit, and a station-specific config *template* — and the unit is
-**enabled**. It still never starts, because it is gated on
+`frpc` (amd64 / arm64 / armhf, no build step, no download), the unit, and a
+rendered config *template* — and the unit is **enabled**. It still never
+starts, because it is gated on
 `ConditionPathExists=/etc/sigmond/frpc.toml`. Installing RAC therefore
 cannot expose a station, and an unconfigured unit does not fail-loop.
 
-Arming is one deliberate operator action:
+The installer fills in everything it can know by itself: the proxy names,
+the station's keypair and pubkey metadata, and the login id. What it cannot
+know is the port assignment, so arming stays one deliberate operator action:
 
 ```bash
-sudo cp /etc/sigmond/frpc.toml.template /etc/sigmond/frpc.toml   # after filling the <...> assignment
+sudo cp /etc/sigmond/frpc.toml.template /etc/sigmond/frpc.toml   # after filling the <...> ports
 sudo systemctl restart wd-rac
 ```
 
-Re-running `install.sh` afterwards is idempotent and leaves an armed tunnel
-running.
-
-This is the deliberate divergence from wd-rac-client, whose installer is
-interactive and self-arming: it registers, receives everything it needs, and
-proves the tunnel is up (`start proxy success` on the primary) before it
-declares victory.
+Re-running the installer is idempotent, rewrites only the *template*, and
+leaves an armed tunnel running.
 
 ## Reaching a station
 
-| WireGuard tier | gw2 address | Who | Can reach |
-|---|---|---|---|
-| wd-mesh | 10.112.0.2 | WsprDaemon admins | everything |
-| wd-rac | 10.111.220.1 | WD station operators | shareable services in the RAC bands |
-| wd-sonde | 10.111.221.1 | Wsprsonde watchers | only the sonde ports — never sigmond stations |
-
-Tiers are enforced with per-interface iptables rules on the gateway. So:
+Admins reach the tunnel ports over WireGuard to the gateway — never from
+the open internet:
 
 ```bash
-ssh -p $((35800 + RAC)) <station-user>@10.111.220.1
+ssh -p <assigned vm-ssh port> <station-user>@10.3.2.1
 ```
 
-Observability is thin by design and by gap (`RAC-Q-010`):
-`systemctl status wd-rac`, frpc's journald log, its local status UI on
-`127.0.0.1:7500`, and the gateway's rac-dashboard on `:50080` — the only
+On the WsprDaemon side the same role is played by that gateway's tiers
+(`wd-mesh` 10.112.0.2 for admins, `wd-rac` 10.111.220.1 for station
+operators), enforced with per-interface firewall rules.
+
+Observability is thin, by design and by gap (`RAC-Q-010`):
+`systemctl status wd-rac` or `sigmond-rac-host`, frpc's journald log, its
+local status UI on `127.0.0.1:7500`, and the gateway's dashboard — the only
 view that answers "is this station actually *reachable*", which the station
 itself cannot tell you.
 
-## Where sigmond-rac stands relative to wd-rac-client
+## Deliberate differences from wd-rac-client
 
-Both are frpc reverse tunnels to the same gateway with the same identity
-model. The differences are real, and each is a config or install change
-rather than a redesign:
+Both are frpc reverse tunnels; these are the places sigmond-rac diverges,
+and why.
 
 | | wd-rac-client | sigmond-rac |
 |---|---|---|
-| Gateways | one instance per gateway (`@gw2` primary, `@gw1` standby), both up always; same identity and ports at each, so no failover logic exists to get wrong | **single gateway** (gw2); if gw2 is down the site is unreachable |
-| Provisioning | registrar POST returns gateways, token, user, and the full band table; RAC number auto-assigned (lowest free ≥ 500) and collision-checked | admin allocates `user`/`token`/`remotePort` out of band; operator pastes them in |
-| Arming | installer registers and starts the tunnel, confirming it came up | **inert until armed** by an explicit operator action |
-| frpc binary | downloaded from the frp release for the local arch | **vendored** per-arch blobs in `bin/` (no network, but unpinned — `RAC-Q-011`) |
-| Transport | `transport.tls.enable`, `loginFailExit = false` so an unreachable gateway at boot is retried in-process | TLS with a **pinned CA** (`trustedCaFile`) — stricter — but no `loginFailExit`, so a gateway down at boot costs a 30 s systemd restart cycle |
-| Privilege | frpc runs as a dedicated `wd-rac` system user with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome` | frpc runs as **root** — deliberate, see below |
-| Proxy names | `<site>-vm-ssh`, `<site>-vm-web`, … — the suffixes the rac-dashboard keys on | same band suffixes, keyed to the reporter ID |
-| Upgrades | add-before-remove under a 10-minute dead-man rollback timer, because the tunnel being replaced is usually the only way in | re-run `install.sh`; an armed tunnel keeps running, but there is no rollback rail |
+| Gateways | one frpc instance per gateway (`@gw2` primary, `@gw1` standby), same identity at each, so failover is a property rather than a procedure | one gateway; if `vpn.hamsci.org` is down the site is unreachable |
+| Provisioning | registrar returns gateways, token, user id and the whole port table | TOFU needs no registration; the admin still allocates remote ports out of band |
+| Arming | the installer registers and starts the tunnel, confirming it came up | inert until an operator arms it |
+| frpc binary | downloaded from the frp release for the local arch | vendored per-arch blobs in `bin/` — no network at install, but unpinned (`RAC-Q-011`) |
+| Privilege | runs as a dedicated `wd-rac` system user with `NoNewPrivileges`, `ProtectSystem=strict` | runs as root: a Proxmox host is administered as root and has no ordinary accounts, and an account per hypervisor is not worth the sandboxing. systemd's own confinement on the existing unit is the cheaper route if it is ever wanted |
+| Upgrades | add-before-remove under a dead-man rollback timer, because the tunnel being replaced is usually the only way in | re-run the installer; an armed tunnel keeps running, but there is no rollback rail |
 
-**On running frpc as root.** wd-rac-client's target is a dedicated Pi where
-a `wd-rac` system user costs nothing. A DASI2 Proxmox host is a different
-machine: it is administered as root and carries no ordinary user accounts,
-and adding one solely so a tunnel client can drop privileges buys a small
-amount of sandboxing at the price of an account that has to be created,
-understood, and maintained on every hypervisor in the fleet. sigmond-rac
-runs frpc as root on purpose. If the sandboxing is wanted later, the
-cheaper route is systemd's own confinement on the existing unit —
-`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`,
-`PrivateTmp` — with no new account anywhere.
+## Open items
+
+- **Single gateway.** Adopting the per-gateway instance model would need a
+  second HamSCI frps; the client side is a templated unit away.
+- **Port allocation is manual.** There is no registrar in the TOFU model, so
+  nothing stops two sites being handed the same port except the admin's
+  records and frps rejecting the second one.
+- **`smd admin rac register` is a gw2 mechanism.** It files a key with
+  gw2's registration drop, which the HamSCI gateway does not use, so
+  `install.sh` skips it unless `SIGMOND_RAC_REGISTER=yes`.
+- **DASI numbering.** Who assigns `DASI-NNN`, and whether a site's
+  hypervisor and VM get two numbers or one number plus a suffix, is a
+  convention this component follows rather than defines.
 
 ## Related repositories
 
 - **sigmond-rac** (this repo): everything installed on the station and on its
   Proxmox host. Spec: [docs/REQUIREMENTS.md](REQUIREMENTS.md).
 - **[wd-rac-client](https://github.com/rrobinett/wd-rac-client)**: the
-  reference RAC client — registrar-driven, dual-gateway, self-arming.
+  WsprDaemon RAC client — registrar-driven, dual-gateway, self-arming.
 - **[sigmond](https://github.com/HamSCI/sigmond)**: installs this component
-  (`smd install sigmond-rac`), provides `smd admin rac register`, and hosts
-  the TUI **RAC** screen used for activation.
-- The gateway side — frps, the registrar, the registration drop, the
-  rac-dashboard, the WireGuard tiers and their user management — lives in
-  WsprDaemon's private server repos and is out of scope here.
+  (`smd install sigmond-rac`) and hosts the TUI **RAC** screen.
+- The gateway side — frps, the TOFU plugin and its registry, the dashboard,
+  WireGuard and its user management — lives on the servers themselves and in
+  WsprDaemon's private repos.

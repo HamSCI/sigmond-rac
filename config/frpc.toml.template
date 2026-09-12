@@ -1,26 +1,51 @@
-# RAC (frpc) reverse-tunnel config TEMPLATE.
-# sigmond-rac/install.sh renders this to /etc/sigmond/frpc.toml.template with the
-# station's proxy name filled in.  To ACTIVATE, get this station's gw2
-# assignment from the WsprDaemon admin (Rob), fill the <...> values, then:
+# RAC (frpc) reverse-tunnel config TEMPLATE — DASI2 VM (guest) variant.
+# sigmond-rac/install.sh renders this to /etc/sigmond/frpc.toml.template with
+# this station's identity filled in.  To ACTIVATE, get this station's remote
+# port assignment from the WsprDaemon admin (Rob), fill the <...> values, then:
 #   sudo cp /etc/sigmond/frpc.toml.template /etc/sigmond/frpc.toml
 #   sudo systemctl restart wd-rac
-# serverAddr/serverPort + the TLS CA are shared across the fleet.
-# remotePort(s) MUST be unique per station on gw2 — never reuse another's.
-# Proxy names are "<reporter ID>-<band>" using the fleet band names
-# (vm-ssh, vm-web, host-ssh, host-ui) — the gw2 rac-dashboard keys on those
-# suffixes to group a station's tunnels, so do not rename them.
+#
+# Gateway: sigmond stations tunnel to HamSCI's own server, vpn.hamsci.org,
+# not to WsprDaemon's gw2.  :35736 is its frps-secure instance (TLS forced,
+# trust-on-first-use auth); :35735 is the legacy open frps that the older
+# HamSCI volunteer stations still use.  There is no registrar here.
+#
+# Identity: the gateway's TOFU plugin admits a login that carries a user id
+# and a pubkey in [metadatas].  The FIRST login to claim a given user id
+# files its pubkey; later logins must present the same key, so nothing else
+# can take this station's identity.  The token is NOT the gate and is empty
+# by design.  Re-keying a station means the admin must first delete its
+# entry from the gateway registry, or the new key is refused.
+#
+# This tunnel carries what the STATION serves: sshd (vm-ssh), ka9q-web
+# (vm-web), and any further service it grows — add one [[proxies]] block per
+# service, named for its band.  The hypervisor's own sshd and Proxmox UI
+# belong to frpc-host.toml instead.
+# remotePort(s) MUST be unique fleet-wide — never reuse another station's.
+# Proxy names are "<reporter ID>-<band>"; the rac-dashboard keys on those
+# band suffixes to group a station's tunnels, so do not rename them.
 
-serverAddr = "gw2.wsprdaemon.org"
+serverAddr = "vpn.hamsci.org"
 serverPort = 35736
-user = "<RAC_USER_FROM_WD_ADMIN>"
+user = "@USER@"
 
 [auth]
 method = "token"
-token = "<RAC_TOKEN_FROM_WD_ADMIN>"
+token = ""
 
+# frps-secure forces TLS.  Its certificate is self-signed and no CA is
+# published, so there is no trustedCaFile to pin: TLS provides the
+# encryption, and the TOFU pubkey below provides the identity.
 [transport.tls]
 enable = true
-trustedCaFile = "/etc/sigmond/frps-ca.crt"
+
+# Reconnect forever instead of exiting when the gateway is unreachable.
+loginFailExit = false
+
+[metadatas]
+pubkey = "@PUBKEY@"
+site = "@SITE@"
+dasi = "@DASI@"
 
 [webServer]
 addr = "127.0.0.1"
@@ -31,11 +56,11 @@ name = "@PROXY@-vm-ssh"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 22
-remotePort = 0   # <SSH_REMOTEPORT_FROM_WD_ADMIN>
+remotePort = 0   # <VM_SSH_REMOTEPORT_FROM_WD_ADMIN>
 
 [[proxies]]
 name = "@PROXY@-vm-web"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 8081
-remotePort = 0   # <WEB_REMOTEPORT_FROM_WD_ADMIN>
+remotePort = 0   # <VM_WEB_REMOTEPORT_FROM_WD_ADMIN>
