@@ -96,45 +96,62 @@ TLS is forced by the server, but its certificate is self-signed and no CA is
 published, so the client enables TLS without pinning a `trustedCaFile`.
 Encryption comes from TLS; identity comes from the key.
 
-## What rides the tunnel
+## What rides the tunnel, and how it grows
 
-| Proxy | Target | Why |
-|---|---|---|
-| `<id>-host-ssh` | `127.0.0.1:22` | the hypervisor's own shell |
-| `<id>-host-ui` | `127.0.0.1:8006` | Proxmox VE web UI — a browser onto the hypervisor can rebuild what ssh cannot |
-| `<id>-vm-ssh` | `<VM address>:22` | the station's shell |
-| `<id>-vm-web` | `<VM address>:8081` | ka9q-web |
+A site publishes a **set of services**, not a fixed list. Each one gets a
+*band*: a name whose prefix says which machine it lives on, and whose
+fleet-wide *base* fixes its remote port.
+
+| Band | Remote port | Target | Service |
+|---|---|---|---|
+| `vm_ssh` | 35800 + n | VM | the station's shell |
+| `vm_grape` | 40800 + n | VM | PSWS/GRAPE WWV carrier charts (:8088) |
+| `vm_web` | 45800 + n | VM | ka9q-web (:8081) |
+| `vm_web2` / `vm_web3` | 46800 / 47800 + n | VM | 2nd / 3rd RX888 web UI |
+| `host_ssh` | 50800 + n | hypervisor | the hypervisor's shell |
+| `host_ui` | 55800 + n | hypervisor | Proxmox VE web UI (:8006) |
+
+Two rules do the work:
+
+- **One number per site.** Every port is `base + n`, so a site's whole port
+  set follows from its single RAC/DASI number and nothing is picked by hand.
+  Ports stay unique fleet-wide as long as the site number is.
+- **The band prefix picks the target.** `host_*` proxies point at
+  `127.0.0.1` — the hypervisor the frpc runs on; `vm_*` proxies point at the
+  VM's address across the bridge. That is what lets one login serve both
+  machines.
+
+The set itself lives in `SIGMOND_RAC_PROXIES` (or `RAC_PROXIES` in
+`coordination.env`) as `band=localport` entries, defaulting to
+`host_ssh=22 host_ui=8006 vm_ssh=22 vm_web=8081`. A site that also serves the
+GRAPE charts and a magnetometer page sets:
+
+```
+SIGMOND_RAC_PROXIES="host_ssh=22 host_ui=8006 vm_ssh=22 vm_web=8081 vm_grape=8088 vm_mag:41800=8090"
+```
+
+and gets six tunnels instead of four. A band already in the table needs only
+`band=localport`; a band that is **not** in the table yet must carry its base
+inline (`vm_mag:41800=8090`), because a base is a fleet-wide allocation and
+guessing one would collide with that service at every other site. The
+installer refuses an unknown bare band rather than inventing a number. Once
+the admin allocates the base it belongs in
+[config/rac-bands.sh](../config/rac-bands.sh) — the one place the table
+lives, and the only edit a new service needs.
 
 The VM's address must be fixed — a static address or a DHCP reservation. The
-proxies forward to an address, not to a VM: if the guest moves, those two
-proxies publish whoever now answers there. `install-host.sh` takes it from
+proxies forward to an address, not to a VM: if the guest moves, every `vm_*`
+proxy publishes whoever now answers there. `install-host.sh` takes it from
 `SIGMOND_VM_IP` (or `DASI_VM_IP` in `coordination.env`) and renders a
 `<VM_IP>` placeholder with a warning when it is not configured.
 
-The list is open. A further service gets one more `[[proxies]]` block named
-for its band — WsprDaemon stations already do this for the PSWS/GRAPE WWV
-carrier charts (`vm-grape`, the VM's :8088), and a DASI2 site that grows one
-follows the same pattern.
-
-The band suffixes (`-vm-ssh`, `-vm-web`, `-host-ssh`, `-host-ui`) are not
-decoration: the rac-dashboard keys on them to group a site's proxies. The
-gateway prefixes each with the login id, so a site appears there as
-`DASI-099.AI6VN-vm-ssh` and friends.
+The band suffixes are not decoration: the rac-dashboard keys on them to group
+a site's proxies. The gateway prefixes each with the login id, so a site
+appears there as `DASI-099.AI6VN-vm-ssh` and friends.
 
 Nothing starts listening on a new port as a result: frpc's own status UI is
 bound to `127.0.0.1:7500`, and every proxied service is reached through the
 tunnel (and however it was already reachable on the site LAN).
-
-## Ports
-
-Remote ports are assigned by the WsprDaemon admin and pasted into the config;
-this component never picks one. The gateway accepts tunnel ports in
-**35800–49999**, and the fleet convention is one number per site with a base
-per band — `35800 + n` for ssh, `45800 + n` for web, and so on, the scheme
-wd-rac-client's registrar hands out automatically.
-
-Reusing another site's port collides on the gateway (`RAC-C-004`); frps is
-the final arbiter and rejects the proxy with `port already used`.
 
 ## Inert by design
 
@@ -145,37 +162,54 @@ starts, because it is gated on `ConditionPathExists` over its config file.
 Installing RAC therefore cannot expose a site, and an unconfigured unit does
 not fail-loop.
 
-The installer fills in everything it can know by itself: the proxy names, the
-keypair and pubkey metadata, the login id, and the VM's address. What it
-cannot know is the port assignment, so arming stays one deliberate action —
-on a DASI2 site, on the hypervisor:
+Given the site number, the installer renders a *complete* config: proxy
+names, keypair and pubkey metadata, login id, the VM's address, and every
+band's port. Nothing is left to fill in — but arming is still a deliberate
+act, so the rendered file is a template until someone copies it into place.
+On a DASI2 site, on the hypervisor:
 
 ```bash
-cp /etc/sigmond/frpc-host.toml.template /etc/sigmond/frpc-host.toml   # after filling the <...> ports
+cp /etc/sigmond/frpc-host.toml.template /etc/sigmond/frpc-host.toml
 systemctl restart sigmond-rac-host
 ```
 
+Without a site number the ports render as `<PORT_band>` placeholders, so an
+unconfigured file is obviously incomplete rather than quietly wrong.
+
 A sigmond station with no hypervisor arms the guest unit instead
 (`/etc/sigmond/frpc.toml`, `systemctl restart wd-rac`) — same identity rules,
-`vm-ssh` and `vm-web` on `127.0.0.1`.
+same bands, with the `vm_*` services on `127.0.0.1`.
 
 Re-running either installer is idempotent, rewrites only the *template*, and
 leaves an armed tunnel running.
 
-## Reaching a site
+## Reaching a service
 
-Admins reach the tunnel ports over WireGuard to the gateway — never from the
-open internet:
+Admins reach every port at the gateway's VPN address — never from the open
+internet:
 
 ```bash
-ssh -p <assigned vm-ssh port> <station-user>@10.3.2.1
+ssh -p $((35800 + n)) <station-user>@10.3.2.1     # the DASI2 VM
+ssh -p $((50800 + n)) root@10.3.2.1               # the Proxmox host
+https://10.3.2.1:$((55800 + n))                   # the Proxmox VE UI
 ```
+
+Reusing another site's port collides on the gateway (`RAC-C-004`); frps is
+the final arbiter and rejects the proxy with `port already used`.
+
+The gateway's firewall accepts **everything** arriving over WireGuard, and
+from the public internet only :22, :51820, the two frps ports — and
+**46000–46999**. A `vm_web2` port (46800 + n) therefore lands in a range the
+whole internet can reach, unlike every other band; check with the admin
+before using it.
 
 On the WsprDaemon side the same role is played by that gateway's tiers
 (`wd-mesh` 10.112.0.2 for admins, `wd-rac` 10.111.220.1 for station
 operators), enforced with per-interface firewall rules.
 
-Observability is thin, by design and by gap (`RAC-Q-010`):
+## Observability
+
+Thin, by design and by gap (`RAC-Q-010`):
 `systemctl status sigmond-rac-host`, frpc's journald log, its local status UI
 on `127.0.0.1:7500`, and the gateway's dashboard — the only view that answers
 "is this site actually *reachable*", which the site itself cannot tell you.

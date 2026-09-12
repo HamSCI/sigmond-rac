@@ -26,50 +26,17 @@
 # entry from the gateway registry, or the new key is refused.
 #
 # This tunnel carries what the STATION serves: sshd (vm-ssh), ka9q-web
-# (vm-web), and any further service it grows — add one [[proxies]] block per
-# service, named for its band (e.g. vm-grape for the PSWS/GRAPE WWV carrier
-# charts on :8088).
-# remotePort(s) MUST be unique fleet-wide — never reuse another station's.
+# (vm-web), and any further service it grows.
+#
+# Services and ports: a station has ONE number (its RAC/DASI number), and
+# each service it publishes gets a band whose remote port is a fleet-wide
+# base plus that number — vm-ssh 35800+n, vm-web 45800+n, and so on.  The
+# band table and the list of what this station publishes live in
+# config/rac-bands.sh and SIGMOND_RAC_PROXIES.  Admins reach every port at
+# the gateway's VPN address, 10.3.2.1:<port>.
 # Proxy names are "<reporter ID>-<band>"; the rac-dashboard keys on those
 # band suffixes to group a station's tunnels, so do not rename them.
 
-serverAddr = "vpn.hamsci.org"
-serverPort = 35736
-user = "@USER@"
 
-# Reconnect forever instead of exiting when the gateway is unreachable at
-# startup.  Must stay above the first table header to be a top-level key.
-loginFailExit = false
-
-[auth]
-method = "token"
-token = ""
-
-# frps-secure forces TLS.  Its certificate is self-signed and no CA is
-# published, so there is no trustedCaFile to pin: TLS provides the
-# encryption, and the TOFU pubkey below provides the identity.
-[transport.tls]
-enable = true
-
-[metadatas]
-pubkey = "@PUBKEY@"
-site = "@SITE@"
-dasi = "@DASI@"
-
-[webServer]
-addr = "127.0.0.1"
-port = 7500
-
-[[proxies]]
-name = "@PROXY@-vm-ssh"
-type = "tcp"
-localIP = "127.0.0.1"
-localPort = 22
-remotePort = 0   # <VM_SSH_REMOTEPORT_FROM_WD_ADMIN>
-
-[[proxies]]
-name = "@PROXY@-vm-web"
-type = "tcp"
-localIP = "127.0.0.1"
-localPort = 8081
-remotePort = 0   # <VM_WEB_REMOTEPORT_FROM_WD_ADMIN>
+# The [[proxies]] blocks are appended here by the installer, one per
+# service in this site's proxy set — see config/rac-bands.sh.

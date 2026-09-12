@@ -7,8 +7,24 @@ NAT'd station via **frpc reverse tunnels** to HamSCI's gateway,
 
 A DASI2 site holds **one** login, and it runs on the Proxmox host — the
 machine that is up when the VM is not.  It publishes the host's own sshd and
-PVE web UI (`-host-ssh`, `-host-ui`) over 127.0.0.1, plus the VM's sshd and
-web (`-vm-ssh`, `-vm-web`) forwarded across the bridge to the VM's address.
+PVE web UI over 127.0.0.1, plus the VM's services forwarded across the bridge
+to the VM's address.  How many tunnels that is depends on what the site
+serves: each service gets a *band*, and its remote port is the band's
+fleet-wide base plus the site's one RAC/DASI number —
+
+    vm_ssh 35800+n · vm_grape 40800+n · vm_web 45800+n · vm_web2/3 46800/47800+n
+    host_ssh 50800+n · host_ui 55800+n
+
+Adding the magnetometer page or a GRAPE page is an entry in
+`SIGMOND_RAC_PROXIES`, not a code change:
+
+```sh
+SIGMOND_RAC_PROXIES="host_ssh=22 host_ui=8006 vm_ssh=22 vm_web=8081 vm_grape=8088"
+```
+
+The band table lives in [config/rac-bands.sh](config/rac-bands.sh); a band
+that is not in it yet must carry its base inline (`vm_mag:41800=8090`) —
+bases are fleet-wide allocations, so the installer refuses to guess one.
 A sigmond station with no hypervisor beneath it arms the guest unit instead.
 
 Docs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the tunnels, the
@@ -24,15 +40,15 @@ gateway, and the access tiers fit together · [docs/REQUIREMENTS.md](docs/REQUIR
   HamSCI gateway's certificate is self-signed and pins nothing)
 - `/etc/systemd/system/wd-rac.service` — the tunnel unit (enabled, but inert
   via `ConditionPathExists=/etc/sigmond/frpc.toml`)
-- `/etc/sigmond/frpc.toml.template` — station-specific, with the proxy names
-  filled in as `<reporter ID>-vm-ssh` / `-vm-web` (the band suffixes the
-  rac-dashboard groups on); `<...>` placeholders for the assigned ports
+- `/etc/sigmond/frpc.toml.template` — station-specific, with one
+  `[[proxies]]` block per published service, named `<reporter ID>-<band>`
+  (the suffixes the rac-dashboard groups on) and ported from the site
+  number
 
 ## Activating
-The installer fills in everything it can know: proxy names, the station's
-pubkey metadata, and its login id.  What it cannot know is the **unique**
-`remotePort`(s), which the WsprDaemon admin assigns.  Fill those into the
-template, then:
+Given the site number (`SIGMOND_RAC_NUMBER`, or `RAC` in
+`coordination.env`), the installer renders a complete config — every band's
+port included.  Arming it is still deliberate:
 
 ```bash
 sudo cp /etc/sigmond/frpc.toml.template /etc/sigmond/frpc.toml

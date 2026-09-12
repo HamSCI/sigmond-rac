@@ -14,7 +14,7 @@
 # must be distinct from the guest's).
 #
 # Self-contained: expects its payload beside it (bin/frpc-<arch>,
-# frps-ca.crt, config/frpc-host.toml.template,
+# frps-ca.crt, config/frpc-host.toml.template, config/rac-bands.sh,
 # systemd/sigmond-rac-host.service).  Normally delivered + run by
 # sigmond's proxmox bootstrap (which scp's the payload to /tmp/rac-host/),
 # but runs standalone from a sigmond-rac checkout too.  Idempotent.
@@ -105,16 +105,51 @@ if [ -z "$vm_ip" ]; then
   log "  DASI_VM_IP in coordination.env), or fill it in before activating."
 fi
 
+#    The site number is what every port is built from: a band's remote port
+#    is its fleet-wide base plus this one number.  Take it from the env,
+#    else coordination.env, else the digits of the DASI id (DASI-099 -> 99).
+rac="${SIGMOND_RAC_NUMBER:-${RAC:-}}"
+[ -n "$rac" ] || rac="$(coord_get SIGMOND_RAC_NUMBER)"
+[ -n "$rac" ] || rac="$(coord_get RAC)"
+if [ -z "$rac" ] && [ -n "$dasi" ]; then
+  rac="$(printf '%s' "$dasi" | tr -dc '0-9' | sed 's/^0*//')"
+fi
+case "$rac" in
+  ''|*[!0-9]*)
+    rac=""
+    log "WARNING: site number not configured — ports render as <PORT_band>"
+    log "  placeholders.  Set SIGMOND_RAC_NUMBER (or RAC in coordination.env)"
+    log "  to the number the WsprDaemon admin assigned."
+    ;;
+esac
+
+#    What this site publishes, as "band=localport" entries.  A service that
+#    is not in the band table yet takes its base inline: "vm_mag:41800=8090".
+#    Adding one is an entry here (or in coordination.env), never a code edit.
+. "$SCRIPT_DIR/config/rac-bands.sh"
+proxies="${SIGMOND_RAC_PROXIES:-}"
+[ -n "$proxies" ] || proxies="$(coord_get RAC_PROXIES)"
+[ -n "$proxies" ] || proxies="host_ssh=22 host_ui=8006 vm_ssh=22 vm_web=8081"
+
 tmpl="/etc/sigmond/frpc-host.toml.template"
-sed -e "s|@PROXY@|${proxy}|g" \
-    -e "s|@USER@|${user}|g" \
-    -e "s|@SITE@|${proxy}|g" \
-    -e "s|@DASI@|${dasi}|g" \
-    -e "s|@VM_IP@|${vm_ip}|g" \
-    -e "s|@PUBKEY@|${pubkey}|g" \
-    "$SCRIPT_DIR/config/frpc-host.toml.template" > "$tmpl"
+{
+  sed -e "s|@PROXY@|${proxy}|g" \
+      -e "s|@USER@|${user}|g" \
+      -e "s|@SITE@|${proxy}|g" \
+      -e "s|@DASI@|${dasi}|g" \
+      -e "s|@PUBKEY@|${pubkey}|g" \
+      "$SCRIPT_DIR/config/frpc-host.toml.template"
+  rac_render_proxies "$proxy" "$rac" "$vm_ip" $proxies
+} > "$tmpl"
 chmod 0640 "$tmpl"
 log "wrote $tmpl (proxy '${proxy}', gateway id '${user}', VM at ${vm_ip})"
+log "  publishes: $proxies"
+if [ -n "$rac" ]; then
+  log "  site $rac — reach each service at 10.3.2.1:<its port>, e.g."
+  log "    ssh -p $((50800 + rac)) root@10.3.2.1        the Proxmox host"
+  log "    https://10.3.2.1:$((55800 + rac))              the Proxmox VE UI"
+  log "    ssh -p $((35800 + rac)) <user>@10.3.2.1      the DASI2 VM"
+fi
 
 # 5. enable (inert via ConditionPathExists until configured)
 systemctl daemon-reload 2>/dev/null || true

@@ -25,11 +25,16 @@
 # design.  Re-keying a site means the admin must first delete its entry from
 # the gateway registry, or the new key is refused.
 #
-# remotePort(s) MUST be unique fleet-wide — never reuse another site's.
+# Services and ports: a site has ONE number (its RAC/DASI number), and each
+# service it publishes gets a band whose remote port is a fleet-wide base
+# plus that number — vm-ssh 35800+n, vm-web 45800+n, host-ssh 50800+n,
+# host-ui 55800+n, and so on.  The band table and the list of what this site
+# publishes live in config/rac-bands.sh and SIGMOND_RAC_PROXIES; adding the
+# magnetometer page or a GRAPE page is one more entry there, not a change
+# here.  Admins reach every port at the gateway's VPN address,
+# 10.3.2.1:<port>.
 # Proxy names are "<reporter ID>-<band>"; the rac-dashboard keys on those
-# band suffixes to group a site's tunnels, so do not rename them.  A further
-# service gets one more [[proxies]] block named for its band (e.g. vm-grape
-# for the PSWS/GRAPE WWV carrier charts on the VM's :8088).
+# band suffixes to group a site's tunnels, so do not rename them.
 
 serverAddr = "vpn.hamsci.org"
 serverPort = 35736
@@ -58,37 +63,5 @@ dasi = "@DASI@"
 addr = "127.0.0.1"
 port = 7500
 
-# --- the hypervisor's own services (local) ---------------------------------
-[[proxies]]
-name = "@PROXY@-host-ssh"
-type = "tcp"
-localIP = "127.0.0.1"
-localPort = 22
-remotePort = 0   # <HOST_SSH_REMOTEPORT_FROM_WD_ADMIN>
-
-# Proxmox VE web UI (https), so the hypervisor can be driven from a browser
-# when the VM is down or being rebuilt — the case this tunnel exists for.
-[[proxies]]
-name = "@PROXY@-host-ui"
-type = "tcp"
-localIP = "127.0.0.1"
-localPort = 8006
-remotePort = 0   # <HOST_UI_REMOTEPORT_FROM_WD_ADMIN>
-
-# --- the DASI2 VM's services (forwarded across the bridge) -----------------
-# localIP is the VM's address as the hypervisor sees it.  Give the VM a
-# fixed address (static or a DHCP reservation): if it moves, these two
-# proxies keep connecting to whoever now answers there.
-[[proxies]]
-name = "@PROXY@-vm-ssh"
-type = "tcp"
-localIP = "@VM_IP@"
-localPort = 22
-remotePort = 0   # <VM_SSH_REMOTEPORT_FROM_WD_ADMIN>
-
-[[proxies]]
-name = "@PROXY@-vm-web"
-type = "tcp"
-localIP = "@VM_IP@"
-localPort = 8081
-remotePort = 0   # <VM_WEB_REMOTEPORT_FROM_WD_ADMIN>
+# The [[proxies]] blocks are appended here by the installer, one per
+# service in this site's proxy set — see config/rac-bands.sh.

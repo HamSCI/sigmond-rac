@@ -165,6 +165,18 @@ screen (operator UX) · the station's local sshd (port 22) and optional web
 - `RAC-F-021` `[CODE]` ✅ A new supported arch SHALL be addable by dropping a
   vendored `frpc-<arch>-v<ver>` binary in `bin/` and bumping `FRP_VER` — no other
   code change.
+- `RAC-F-022` `[NEW]` ✅ The set of published services SHALL be data, not code:
+  each service is a *band* (`band=localport` in `SIGMOND_RAC_PROXIES` /
+  `RAC_PROXIES`) whose remote port is its fleet-wide base plus the site's
+  number, and whose prefix selects the target (`host_*` → 127.0.0.1,
+  `vm_*` → the VM's address).  Bases live in one table
+  (`config/rac-bands.sh`).  A band absent from the table SHALL be rejected
+  unless its base is given inline (`band:base=localport`) — the installer
+  SHALL NOT invent a base, since a base is a fleet-wide allocation.
+- `RAC-F-023` `[NEW]` ✅ Ports SHALL derive from one site number
+  (`SIGMOND_RAC_NUMBER` / `RAC`, else the digits of the DASI id); with no
+  number they SHALL render as `<PORT_band>` placeholders rather than a
+  guess.
 
 ## 7. Quality / non-functional requirements
 

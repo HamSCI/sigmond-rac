@@ -88,15 +88,48 @@ else
   user="<DASI_ID_OR_STATION_ID>"
 fi
 
+#    The site number is what every port is built from: a band's remote port
+#    is its fleet-wide base plus this one number.  Take it from the env,
+#    else coordination.env, else the digits of the DASI id (DASI-099 -> 99).
+rac="${SIGMOND_RAC_NUMBER:-${RAC:-}}"
+[ -n "$rac" ] || rac="$(coord_get SIGMOND_RAC_NUMBER)"
+[ -n "$rac" ] || rac="$(coord_get RAC)"
+if [ -z "$rac" ] && [ -n "$dasi" ]; then
+  rac="$(printf '%s' "$dasi" | tr -dc '0-9' | sed 's/^0*//')"
+fi
+case "$rac" in
+  ''|*[!0-9]*)
+    rac=""
+    log "WARNING: site number not configured — ports render as <PORT_band>"
+    log "  placeholders.  Set SIGMOND_RAC_NUMBER (or RAC in coordination.env)"
+    log "  to the number the WsprDaemon admin assigned."
+    ;;
+esac
+
+#    What this site publishes, as "band=localport" entries.  A service that
+#    is not in the band table yet takes its base inline: "vm_mag:41800=8090".
+#    Adding one is an entry here (or in coordination.env), never a code edit.
+. "$SCRIPT_DIR/config/rac-bands.sh"
+proxies="${SIGMOND_RAC_PROXIES:-}"
+[ -n "$proxies" ] || proxies="$(coord_get RAC_PROXIES)"
+[ -n "$proxies" ] || proxies="vm_ssh=22 vm_web=8081"
+
 tmpl="/etc/sigmond/frpc.toml.template"
-sed -e "s|@PROXY@|${proxy}|g" \
-    -e "s|@USER@|${user}|g" \
-    -e "s|@SITE@|${proxy}|g" \
-    -e "s|@DASI@|${dasi}|g" \
-    -e "s|@PUBKEY@|${pubkey}|g" \
-    "$SCRIPT_DIR/config/frpc.toml.template" > "$tmpl"
+{
+  sed -e "s|@PROXY@|${proxy}|g" \
+      -e "s|@USER@|${user}|g" \
+      -e "s|@SITE@|${proxy}|g" \
+      -e "s|@DASI@|${dasi}|g" \
+      -e "s|@PUBKEY@|${pubkey}|g" \
+      "$SCRIPT_DIR/config/frpc.toml.template"
+  rac_render_proxies "$proxy" "$rac" "127.0.0.1" $proxies
+} > "$tmpl"
 chmod 0640 "$tmpl"
 log "wrote $tmpl (proxy '${proxy}', gateway id '${user}')"
+log "  publishes: $proxies"
+if [ -n "$rac" ]; then
+  log "  station $rac — ssh -p $((35800 + rac)) <user>@10.3.2.1"
+fi
 
 # 5. gateway key registration — NOT needed on vpn.hamsci.org
 #    That gateway authenticates by trust-on-first-use: the station presents
