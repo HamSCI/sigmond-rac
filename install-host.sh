@@ -34,13 +34,35 @@ src="$SCRIPT_DIR/bin/$binfile"
 install -m 0755 -o root -g root "$src" /usr/local/sbin/frpc
 log "installed /usr/local/sbin/frpc ($($src --version 2>/dev/null || echo "$FRP_VER"))"
 
-# 2. frps TLS CA
+# 2. frps TLS CAs — ONE PER GATEWAY.
+#
+# ⛔ There is no single "the" frps CA, and pretending there is broke every
+# HamSCI station.  gw2.wsprdaemon.org presents CN=GW2.WSPRDAEMON.ORG; vpn1 and
+# vpn2.hamsci.org present CN=vpn.hamsci.org.  Until 2026-10-24 this script
+# installed gw2's cert over /etc/sigmond/frps-ca.crt unconditionally, so a
+# HamSCI station pinned the wrong CA, could not complete a TLS login to either
+# HamSCI gateway, and fell silently down its tier ladder to the legacy OPEN
+# port 35735.  Measured on AI6VN that day: pinned EC:71:A9:00:17:77:28:4E:...,
+# gateways presenting 7A:F8:BF:F8:E4:3D:C1:F4:...
+#
+# Worse, it re-clobbered the file on every run, so correcting the cert on the
+# station did not hold.  Each gateway's CA now lands at its OWN path and the
+# config names the one it needs.
 install -d -m 0755 /etc/sigmond
-install -m 0644 -o root -g root "$SCRIPT_DIR/frps-ca.crt" /etc/sigmond/frps-ca.crt
+install -m 0644 -o root -g root "$SCRIPT_DIR/frps-ca-gw2.crt"    /etc/sigmond/frps-ca-gw2.crt
+install -m 0644 -o root -g root "$SCRIPT_DIR/frps-ca-hamsci.crt" /etc/sigmond/frps-ca-hamsci.crt
+# The legacy path, for a station still running a config that names it.  Seeded
+# once and NEVER overwritten: a station whose cert was corrected by hand keeps
+# the correction.
+[ -e /etc/sigmond/frps-ca.crt ] || \
+    install -m 0644 -o root -g root "$SCRIPT_DIR/frps-ca-gw2.crt" /etc/sigmond/frps-ca.crt
 
-# 3. systemd unit
+# 3. systemd units — the legacy single-tunnel unit, and the per-gateway
+#    template (`sigmond-rac-host@vpn1`, `@vpn2`) that replaces it.
 install -m 0644 -o root -g root "$SCRIPT_DIR/systemd/sigmond-rac-host.service" \
         /etc/systemd/system/sigmond-rac-host.service
+install -m 0644 -o root -g root "$SCRIPT_DIR/systemd/sigmond-rac-host@.service" \
+        /etc/systemd/system/sigmond-rac-host@.service
 
 # 4. render the host-specific template (proxy name from identity)
 call="${STATION_CALL:-AC0G}"

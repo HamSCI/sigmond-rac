@@ -1,0 +1,24 @@
+[Unit]
+Description=Sigmond Remote Access Channel — Proxmox HOST tunnel to gateway %i (frpc)
+Documentation=https://github.com/HamSCI/sigmond-rac
+After=network-online.target
+Wants=network-online.target
+# One instance per GATEWAY: `sigmond-rac-host@vpn1` and `sigmond-rac-host@vpn2`
+# run two independent sessions, so one gateway being down or unreachable from
+# this station's network costs the other nothing.  There is no failover and no
+# election between them: both are live, and an admin who cannot reach the
+# station through one uses the other.
+#
+# Stays inert until its own config exists, so enabling an instance before the
+# station is configured is harmless.
+ConditionPathExists=/etc/sigmond/frpc-host-%i.toml
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/frpc -c /etc/sigmond/frpc-host-%i.toml
+Restart=always
+RestartSec=30s
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target
