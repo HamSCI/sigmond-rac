@@ -29,6 +29,7 @@ type = "tcp"
 localIP = "127.0.0.1"
 localPort = 22
 remotePort = 0   # <SSH_REMOTEPORT_FROM_WD_ADMIN>
+# @LOGIN@
 
 [[proxies]]
 name = "@PROXY@-WEB"

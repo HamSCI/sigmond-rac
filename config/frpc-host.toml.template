@@ -31,3 +31,6 @@ type = "tcp"
 localIP = "127.0.0.1"
 localPort = 22
 remotePort = 0   # <SSH_REMOTEPORT_FROM_WD_ADMIN — unique, ≠ the guest VM's>
+# The login the gateway's RAC dashboard puts in its ssh command.
+[proxies.metadatas]
+user = "root"

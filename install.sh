@@ -63,7 +63,19 @@ else
   log "  (smd config identity), then re-run:  smd install sigmond-rac"
 fi
 tmpl="/etc/sigmond/frpc.toml.template"
-sed "s|@PROXY@|${proxy}|g" "$SCRIPT_DIR/config/frpc.toml.template" > "$tmpl"
+# The ssh proxy advertises the login the gateway's RAC dashboard puts in its
+# ssh command (Rob, 2026-11-02): the operator who ran the install
+# (SUDO_USER, set when smd elevated itself), unless SIGMOND_RAC_LOGIN names
+# one.  A name that is not a plain account name, or none at all, advertises
+# nothing and the dashboard keeps its own default.
+login="${SIGMOND_RAC_LOGIN:-${SUDO_USER:-}}"
+if [[ "$login" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$login" != root ]; then
+  login_meta="# The login the gateway's RAC dashboard puts in its ssh command.\\n[proxies.metadatas]\\nuser = \"${login}\""
+else
+  login_meta=""
+fi
+sed -e "s|@PROXY@|${proxy}|g" -e "s|^# @LOGIN@\$|${login_meta}|" \
+    "$SCRIPT_DIR/config/frpc.toml.template" > "$tmpl"
 chmod 0640 "$tmpl"
 log "wrote $tmpl (proxy '${proxy}')"
 
