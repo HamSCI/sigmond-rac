@@ -46,7 +46,11 @@ install -m 0644 -o root -g root "$SCRIPT_DIR/systemd/wd-rac.service" \
 #    identity BEFORE the RAC can be activated or registered; baking in a
 #    default callsign here is how wrong accounts end up on the gateway.
 coord_get() {
-  sed -n "s/^$1=//p" /etc/sigmond/coordination.env 2>/dev/null \
+  # A fresh machine has no coordination.env until the station is configured.
+  # sed then exits 2 and pipefail ended the whole install before it could
+  # render the placeholder below (sigma, first bare-metal install, 2026-11-04).
+  [ -r /etc/sigmond/coordination.env ] || return 0
+  sed -n "s/^$1=//p" /etc/sigmond/coordination.env \
     | head -1 | tr -d "\"'"
 }
 call="${STATION_REPORTER_ID:-${STATION_CALL:-}}"
